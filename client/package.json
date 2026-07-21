@@ -3,6 +3,11 @@
   "version": "3.0.0",
   "private": true,
   "description": "Cliente desktop Electron do Spotgino.",
+  "author": {
+    "name": "Spotgino",
+    "email": "desenvolvimentosoften2@gmail.com"
+  },
+  "homepage": "https://github.com/LeonardoHGB/play-togheter",
   "main": "electron/main.cjs",
   "engines": {
     "node": ">=20"
@@ -49,6 +54,7 @@
       ],
       "category": "AudioVideo",
       "icon": "build/icon.png",
+      "maintainer": "Spotgino <desenvolvimentosoften2@gmail.com>",
       "artifactName": "Spotgino-${version}-${arch}.${ext}"
     },
     "win": {
