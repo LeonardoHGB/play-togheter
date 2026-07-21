@@ -53,8 +53,13 @@
       "target": [
         "nsis",
         "portable"
-      ],
-      "artifactName": "Listen-Together-${version}-${arch}.${ext}"
+      ]
+    },
+    "nsis": {
+      "artifactName": "Listen-Together-Setup-${version}-${arch}.${ext}"
+    },
+    "portable": {
+      "artifactName": "Listen-Together-Portable-${version}-${arch}.${ext}"
     }
   }
 }
