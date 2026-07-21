@@ -66,11 +66,17 @@ export function useFriends({ socketConnected, displayName, onJoinRoom, notify })
     socket.on("friend:presence", onPresence);
     socket.on("invite:received", onInvite);
 
+    // socket.timeout(): o callback vira (err, res) — err quando o servidor não
+    // responde (ex.: versão antiga sem os handlers de amigos).
     const register = () =>
-      socket.emit(
+      socket.timeout(8000).emit(
         "account:register",
         { displayName: displayNameRef.current },
-        async (res) => {
+        async (err, res) => {
+          if (err) {
+            notify?.("Servidor sem suporte a amigos. Atualize o servidor.");
+            return;
+          }
           if (res?.ok) {
             credsRef.current = { userId: res.account.userId, token: res.account.token };
             await window.electronAPI?.saveAccount?.(res.account);
@@ -82,7 +88,11 @@ export function useFriends({ socketConnected, displayName, onJoinRoom, notify })
     const authenticate = () => {
       const stored = credsRef.current;
       if (stored?.userId && stored?.token) {
-        socket.emit("account:login", stored, (res) => {
+        socket.timeout(8000).emit("account:login", stored, (err, res) => {
+          if (err) {
+            notify?.("Servidor sem suporte a amigos. Atualize o servidor.");
+            return;
+          }
           if (res?.ok) applyState(res.state);
           else register();
         });
@@ -118,31 +128,44 @@ export function useFriends({ socketConnected, displayName, onJoinRoom, notify })
           resolve({ ok: false });
           return;
         }
-        socket.emit("friend:request", { code: String(code || "").trim().toUpperCase() }, (res) => {
-          notify?.(res?.message || (res?.ok ? "Pedido enviado." : "Não foi possível."));
-          resolve(res || { ok: false });
-        });
+        socket
+          .timeout(8000)
+          .emit("friend:request", { code: String(code || "").trim().toUpperCase() }, (err, res) => {
+            if (err) {
+              notify?.("O servidor não respondeu. Ele foi atualizado?");
+              resolve({ ok: false });
+              return;
+            }
+            notify?.(res?.message || (res?.ok ? "Pedido enviado." : "Não foi possível."));
+            resolve(res || { ok: false });
+          });
       }),
     [notify]
   );
 
   const acceptFriend = useCallback((userId) => {
-    getSocket()?.emit("friend:accept", { userId }, () => {});
+    getSocket()?.timeout(8000).emit("friend:accept", { userId }, () => {});
   }, []);
 
   const declineFriend = useCallback((userId) => {
-    getSocket()?.emit("friend:decline", { userId }, () => {});
+    getSocket()?.timeout(8000).emit("friend:decline", { userId }, () => {});
   }, []);
 
   const removeFriend = useCallback((userId) => {
-    getSocket()?.emit("friend:remove", { userId }, () => {});
+    getSocket()?.timeout(8000).emit("friend:remove", { userId }, () => {});
   }, []);
 
   const inviteFriend = useCallback(
     (userId, code) => {
-      getSocket()?.emit("invite:send", { userId, code }, (res) => {
-        notify?.(res?.message || (res?.ok ? "Convite enviado." : "Não foi possível convidar."));
-      });
+      getSocket()
+        ?.timeout(8000)
+        .emit("invite:send", { userId, code }, (err, res) => {
+          if (err) {
+            notify?.("O servidor não respondeu ao convite.");
+            return;
+          }
+          notify?.(res?.message || (res?.ok ? "Convite enviado." : "Não foi possível convidar."));
+        });
     },
     [notify]
   );
@@ -246,6 +269,8 @@ export function FriendsPanel({
             onChange={(event) => setCode(event.target.value.toUpperCase())}
             placeholder="Código do amigo (ex: A1B2C3D4)"
             maxLength={12}
+            autoFocus
+            spellCheck={false}
             onKeyDown={(event) => event.key === "Enter" && submitAdd()}
           />
           <button className="primary-button" onClick={submitAdd} disabled={sending || !code.trim()}>
