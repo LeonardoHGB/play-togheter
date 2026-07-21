@@ -1,0 +1,20 @@
+{
+  "name": "listen-together-server",
+  "version": "3.0.0",
+  "private": true,
+  "description": "API e Socket.IO do Listen Together.",
+  "main": "src/index.cjs",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node src/index.cjs",
+    "dev": "node --watch src/index.cjs",
+    "check": "node --check src/index.cjs"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^5.1.0",
+    "socket.io": "^4.8.3"
+  }
+}

@@ -1,0 +1,39 @@
+services:
+  listen-together-server:
+    build:
+      context: ./server
+      dockerfile: Dockerfile
+    container_name: listen-together-server
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      HOST: 0.0.0.0
+      PORT: 3333
+      SERVER_NAME: "${SERVER_NAME:-Listen Together}"
+      ALLOWED_ORIGINS: "${ALLOWED_ORIGINS:-*}"
+      MAX_ROOMS: "${MAX_ROOMS:-500}"
+      MAX_MEMBERS_PER_ROOM: "${MAX_MEMBERS_PER_ROOM:-30}"
+      ROOM_IDLE_TTL_MS: "${ROOM_IDLE_TTL_MS:-21600000}"
+    expose:
+      - "3333"
+
+  caddy:
+    image: caddy:2-alpine
+    container_name: listen-together-caddy
+    restart: unless-stopped
+    depends_on:
+      - listen-together-server
+    environment:
+      DOMAIN: "${DOMAIN}"
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+
+volumes:
+  caddy_data:
+  caddy_config:

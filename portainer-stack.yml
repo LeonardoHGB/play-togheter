@@ -1,0 +1,18 @@
+services:
+  listen-together-server:
+    build:
+      context: ./server
+      dockerfile: Dockerfile
+    container_name: listen-together-server
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      HOST: 0.0.0.0
+      PORT: 3333
+      SERVER_NAME: "${SERVER_NAME:-Listen Together}"
+      ALLOWED_ORIGINS: "${ALLOWED_ORIGINS:-*}"
+      MAX_ROOMS: "${MAX_ROOMS:-500}"
+      MAX_MEMBERS_PER_ROOM: "${MAX_MEMBERS_PER_ROOM:-30}"
+      ROOM_IDLE_TTL_MS: "${ROOM_IDLE_TTL_MS:-21600000}"
+    ports:
+      - "${PUBLIC_PORT:-3333}:3333"

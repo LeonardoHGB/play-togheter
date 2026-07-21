@@ -1,0 +1,4 @@
+{$DOMAIN} {
+  encode zstd gzip
+  reverse_proxy listen-together-server:3333
+}

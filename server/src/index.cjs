@@ -1,0 +1,433 @@
+const cors = require("cors");
+const crypto = require("crypto");
+const express = require("express");
+const http = require("http");
+const { Server } = require("socket.io");
+
+const PORT = Number(process.env.PORT || 3333);
+const HOST = process.env.HOST || "0.0.0.0";
+const SERVER_NAME = process.env.SERVER_NAME || "Listen Together";
+const MAX_ROOMS = Math.max(1, Number(process.env.MAX_ROOMS || 500));
+const MAX_MEMBERS_PER_ROOM = Math.max(2, Number(process.env.MAX_MEMBERS_PER_ROOM || 30));
+const ROOM_IDLE_TTL_MS = Math.max(60_000, Number(process.env.ROOM_IDLE_TTL_MS || 21_600_000));
+
+const configuredOrigins = String(process.env.ALLOWED_ORIGINS || "*")
+  .split(",")
+  .map((origin) => origin.trim())
+  .filter(Boolean);
+
+function isOriginAllowed(origin) {
+  if (configuredOrigins.includes("*")) return true;
+  if (!origin || origin === "null") return true;
+  return configuredOrigins.includes(origin);
+}
+
+const corsOptions = {
+  origin(origin, callback) {
+    if (isOriginAllowed(origin)) {
+      callback(null, true);
+      return;
+    }
+    callback(new Error("Origem não permitida pelo servidor."));
+  },
+  methods: ["GET", "POST"]
+};
+
+const app = express();
+app.set("trust proxy", 1);
+app.disable("x-powered-by");
+app.use(cors(corsOptions));
+app.use(express.json({ limit: "32kb" }));
+
+const server = http.createServer(app);
+const io = new Server(server, {
+  cors: corsOptions,
+  transports: ["websocket", "polling"],
+  pingTimeout: 60_000,
+  maxHttpBufferSize: 100_000
+});
+
+const rooms = new Map();
+
+const demoTracks = [
+  {
+    id: "demo-midnight-interface",
+    uri: "demo:track:midnight-interface",
+    title: "Midnight Interface",
+    artist: "Demo Waves",
+    album: "Synchronized",
+    durationMs: 214000,
+    cover: null,
+    externalUrl: null,
+    type: "track"
+  },
+  {
+    id: "demo-neon-connections",
+    uri: "demo:track:neon-connections",
+    title: "Neon Connections",
+    artist: "Socket Friends",
+    album: "Realtime Sessions",
+    durationMs: 188000,
+    cover: null,
+    externalUrl: null,
+    type: "track"
+  },
+  {
+    id: "demo-linux-after-dark",
+    uri: "demo:track:linux-after-dark",
+    title: "Linux After Dark",
+    artist: "Electron Club",
+    album: "Desktop Dreams",
+    durationMs: 241000,
+    cover: null,
+    externalUrl: null,
+    type: "track"
+  }
+];
+
+function roomCode() {
+  return crypto.randomBytes(3).toString("hex").toUpperCase();
+}
+
+function expectedPosition(playback) {
+  if (!playback) return 0;
+  if (!playback.isPlaying) return playback.positionMs || 0;
+
+  return Math.min(
+    playback.durationMs || Number.MAX_SAFE_INTEGER,
+    (playback.positionMs || 0) + Math.max(0, Date.now() - playback.changedAt)
+  );
+}
+
+function cleanTrack(track) {
+  if (!track || typeof track !== "object") return null;
+
+  return {
+    id: String(track.id || "").slice(0, 180),
+    uri: String(track.uri || "").slice(0, 300),
+    title: String(track.title || "Conteúdo sem título").slice(0, 240),
+    artist: String(track.artist || "Spotify").slice(0, 240),
+    album: String(track.album || "").slice(0, 240),
+    durationMs: Math.max(0, Number(track.durationMs) || 0),
+    cover: typeof track.cover === "string" ? track.cover.slice(0, 1000) : null,
+    externalUrl:
+      typeof track.externalUrl === "string"
+        ? track.externalUrl.slice(0, 1000)
+        : null,
+    type: track.type === "episode" ? "episode" : "track"
+  };
+}
+
+function serializeRoom(room) {
+  return {
+    code: room.code,
+    hostId: room.hostId,
+    members: [...room.members.values()],
+    playback: room.playback,
+    queue: room.queue,
+    messages: room.messages.slice(-80)
+  };
+}
+
+function emitRoom(room) {
+  room.lastActivityAt = Date.now();
+  io.to(room.code).emit("room:state", serializeRoom(room));
+}
+
+function isMaterialPlaybackChange(previous, incoming) {
+  if (!previous?.track && incoming?.track) return true;
+  if (previous?.track && !incoming?.track) return true;
+  if (!previous && incoming) return true;
+
+  if (previous?.track?.id !== incoming?.track?.id) return true;
+  if (previous?.isPlaying !== incoming?.isPlaying) return true;
+  if (previous?.source !== incoming?.source) return true;
+
+  const previousExpected = expectedPosition(previous);
+  const incomingPosition = Number(incoming?.positionMs) || 0;
+  return Math.abs(previousExpected - incomingPosition) >= 1500;
+}
+
+function buildPlayback(incoming, previousVersion = 0, source = "spotify") {
+  const track = cleanTrack(incoming.track);
+
+  return {
+    track,
+    isPlaying: Boolean(incoming.isPlaying),
+    positionMs: Math.max(0, Number(incoming.positionMs) || 0),
+    durationMs: track?.durationMs || Math.max(0, Number(incoming.durationMs) || 0),
+    changedAt: Date.now(),
+    spotifyTimestamp: Number(incoming.spotifyTimestamp) || null,
+    deviceName: String(incoming.deviceName || "").slice(0, 180),
+    source,
+    version: previousVersion + 1
+  };
+}
+
+app.get("/", (_request, response) => {
+  response.json({
+    name: SERVER_NAME,
+    status: "online",
+    service: "listen-together-server"
+  });
+});
+
+app.get("/health", (_request, response) => {
+  response.json({
+    status: "ok",
+    name: SERVER_NAME,
+    rooms: rooms.size,
+    connections: io.engine.clientsCount,
+    uptimeSeconds: Math.floor(process.uptime()),
+    version: "3.0.0"
+  });
+});
+
+app.get("/demo-tracks", (_request, response) => {
+  response.json(demoTracks);
+});
+
+io.on("connection", (socket) => {
+  socket.on("room:create", ({ displayName }, callback) => {
+    if (rooms.size >= MAX_ROOMS) {
+      callback?.({ ok: false, message: "O servidor atingiu o limite de salas." });
+      return;
+    }
+
+    let code = roomCode();
+    while (rooms.has(code)) code = roomCode();
+    const room = {
+      code,
+      hostId: socket.id,
+      members: new Map(),
+      playback: buildPlayback(
+        {
+          track: demoTracks[0],
+          isPlaying: false,
+          positionMs: 0,
+          deviceName: "Modo demonstração"
+        },
+        0,
+        "demo"
+      ),
+      queue: [],
+      messages: [],
+      createdAt: Date.now(),
+      lastActivityAt: Date.now()
+    };
+
+    room.members.set(socket.id, {
+      id: socket.id,
+      name: String(displayName || "Host").trim().slice(0, 60) || "Host",
+      isHost: true,
+      joinedAt: Date.now()
+    });
+
+    rooms.set(code, room);
+    socket.join(code);
+    socket.data.roomCode = code;
+    emitRoom(room);
+    callback?.({ ok: true, room: serializeRoom(room) });
+  });
+
+  socket.on("room:join", ({ code, displayName }, callback) => {
+    const normalizedCode = String(code || "").trim().toUpperCase();
+    const room = rooms.get(normalizedCode);
+
+    if (!room) {
+      callback?.({ ok: false, message: "Sala não encontrada." });
+      return;
+    }
+
+    if (room.members.size >= MAX_MEMBERS_PER_ROOM) {
+      callback?.({ ok: false, message: "A sala atingiu o limite de participantes." });
+      return;
+    }
+
+    room.members.set(socket.id, {
+      id: socket.id,
+      name:
+        String(displayName || "Convidado").trim().slice(0, 60) || "Convidado",
+      isHost: false,
+      joinedAt: Date.now()
+    });
+
+    socket.join(normalizedCode);
+    socket.data.roomCode = normalizedCode;
+    emitRoom(room);
+    callback?.({ ok: true, room: serializeRoom(room) });
+  });
+
+  socket.on("playback:host-sync", ({ playback }, callback) => {
+    const room = rooms.get(socket.data.roomCode);
+    const member = room?.members.get(socket.id);
+
+    if (!room || !member?.isHost) {
+      callback?.({ ok: false, message: "Somente o host pode sincronizar a sala." });
+      return;
+    }
+
+    if (!playback?.track) {
+      callback?.({ ok: false, message: "Estado de reprodução inválido." });
+      return;
+    }
+
+    const candidate = buildPlayback(
+      playback,
+      room.playback?.version || 0,
+      playback.source === "demo" ? "demo" : "spotify"
+    );
+
+    if (!isMaterialPlaybackChange(room.playback, candidate)) {
+      callback?.({ ok: true, updated: false });
+      return;
+    }
+
+    room.playback = candidate;
+    emitRoom(room);
+    callback?.({ ok: true, updated: true });
+  });
+
+  socket.on("playback:demo-command", ({ action, positionMs, track }, callback) => {
+    const room = rooms.get(socket.data.roomCode);
+    const member = room?.members.get(socket.id);
+
+    if (!room || !member?.isHost) {
+      callback?.({ ok: false, message: "Somente o host controla a reprodução." });
+      return;
+    }
+
+    const current = room.playback;
+    const nextTrack = track ? cleanTrack(track) : current.track;
+    let nextPosition = expectedPosition(current);
+    let nextPlaying = current.isPlaying;
+
+    if (action === "play") nextPlaying = true;
+    if (action === "pause") nextPlaying = false;
+    if (action === "seek") nextPosition = Math.max(0, Number(positionMs) || 0);
+    if (action === "track") {
+      nextPosition = 0;
+      nextPlaying = true;
+    }
+
+    room.playback = buildPlayback(
+      {
+        track: nextTrack,
+        isPlaying: nextPlaying,
+        positionMs: nextPosition,
+        deviceName: "Modo demonstração"
+      },
+      current.version,
+      "demo"
+    );
+
+    emitRoom(room);
+    callback?.({ ok: true });
+  });
+
+  socket.on("queue:add", ({ track }, callback) => {
+    const room = rooms.get(socket.data.roomCode);
+    const cleaned = cleanTrack(track);
+
+    if (!room || !cleaned) {
+      callback?.({ ok: false, message: "Faixa inválida." });
+      return;
+    }
+
+    room.queue.push(cleaned);
+    emitRoom(room);
+    callback?.({ ok: true });
+  });
+
+  socket.on("queue:shift", (_payload, callback) => {
+    const room = rooms.get(socket.data.roomCode);
+    const member = room?.members.get(socket.id);
+
+    if (!room || !member?.isHost) {
+      callback?.({ ok: false, message: "Somente o host altera a fila." });
+      return;
+    }
+
+    const track = room.queue.shift() || null;
+    emitRoom(room);
+    callback?.({ ok: true, track });
+  });
+
+  socket.on("queue:remove", ({ index }, callback) => {
+    const room = rooms.get(socket.data.roomCode);
+    const member = room?.members.get(socket.id);
+    const numericIndex = Number(index);
+
+    if (!room || !member?.isHost || !Number.isInteger(numericIndex)) {
+      callback?.({ ok: false, message: "Não foi possível remover a faixa." });
+      return;
+    }
+
+    room.queue.splice(numericIndex, 1);
+    emitRoom(room);
+    callback?.({ ok: true });
+  });
+
+  socket.on("chat:send", ({ message }) => {
+    const room = rooms.get(socket.data.roomCode);
+    const member = room?.members.get(socket.id);
+    const cleanMessage = String(message || "").trim().slice(0, 500);
+
+    if (!room || !member || !cleanMessage) return;
+
+    room.messages.push({
+      id: crypto.randomUUID(),
+      memberId: socket.id,
+      author: member.name,
+      message: cleanMessage,
+      createdAt: Date.now()
+    });
+
+    emitRoom(room);
+  });
+
+  socket.on("disconnect", () => {
+    const room = rooms.get(socket.data.roomCode);
+    if (!room) return;
+
+    room.members.delete(socket.id);
+
+    if (room.members.size === 0) {
+      rooms.delete(room.code);
+      return;
+    }
+
+    if (room.hostId === socket.id) {
+      const [newHostId, newHost] = room.members.entries().next().value;
+      room.hostId = newHostId;
+      room.members.set(newHostId, { ...newHost, isHost: true });
+    }
+
+    emitRoom(room);
+  });
+});
+
+const cleanupTimer = setInterval(() => {
+  const now = Date.now();
+  for (const [code, room] of rooms.entries()) {
+    if (room.members.size === 0 || now - room.lastActivityAt > ROOM_IDLE_TTL_MS) {
+      io.in(code).disconnectSockets(true);
+      rooms.delete(code);
+    }
+  }
+}, 60_000);
+cleanupTimer.unref();
+
+server.listen(PORT, HOST, () => {
+  console.log(`${SERVER_NAME}: http://${HOST}:${PORT}`);
+  console.log(`Origens permitidas: ${configuredOrigins.join(", ")}`);
+});
+
+function shutdown(signal) {
+  console.log(`Recebido ${signal}. Encerrando servidor...`);
+  server.close(() => process.exit(0));
+  setTimeout(() => process.exit(1), 10_000).unref();
+}
+
+process.on("SIGTERM", () => shutdown("SIGTERM"));
+process.on("SIGINT", () => shutdown("SIGINT"));
