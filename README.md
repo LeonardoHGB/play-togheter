@@ -173,6 +173,7 @@ O mesmo executável serve para todos: cada pessoa configura a URL do servidor de
 
 - Quem tinha o app antigo **Listen Together** instalado deve desinstalá-lo — o Spotgino instala em paralelo (identidade nova) e a config é migrada automaticamente no primeiro uso.
 - No Linux sob **Wayland** (GNOME padrão), o compositor ignora "sempre visível": o mini player funciona, mas pode ficar atrás de outras janelas. Em X11 funciona normalmente.
+- No Linux, as **notificações** são mais confiáveis pelo pacote **`.deb`** (registra o atalho `.desktop`, dando nome e ícone). No **AppImage** elas ainda aparecem, mas o clique para focar pode não funcionar em alguns ambientes — o contador de mensagens não lidas cobre esse caso.
 - No build **portátil** do Windows, as notificações toast podem não aparecer (limitação do Windows para apps sem instalação); o contador de mensagens não lidas cobre esse caso. O instalador não tem essa limitação.
 
 ## Comandos úteis

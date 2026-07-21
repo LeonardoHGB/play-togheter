@@ -583,6 +583,11 @@ input[type="range"] { padding: 0; accent-color: #22c55e; border: 0; box-shadow: 
   text-transform: uppercase;
 }
 .friend-add-row input:focus { outline: none; border-color: #22c55e; }
+.friend-add-row .primary-button {
+  width: auto;
+  margin-top: 0;
+  flex-shrink: 0;
+}
 
 .friend-block { margin-bottom: 20px; }
 .friend-block .section-title {
@@ -848,3 +853,33 @@ input[type="range"] { padding: 0; accent-color: #22c55e; border: 0; box-shadow: 
   padding: 10px 12px;
   border-top: 1px solid #27272a;
 }
+
+/* ==================== Atualizações ==================== */
+
+.update-pill {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  border: 1px solid #22c55e;
+  border-radius: 999px;
+  background: rgba(34, 197, 94, .14);
+  color: #86efac;
+  font-size: 12px;
+  font-weight: 800;
+}
+.update-pill:hover { background: rgba(34, 197, 94, .24); }
+
+.update-check-link {
+  width: 100%;
+  margin-top: 12px;
+  padding: 10px;
+  border: 1px solid #27272a;
+  border-radius: 12px;
+  background: transparent;
+  color: #a1a1aa;
+  font-size: 13px;
+  font-weight: 600;
+  transition: border-color .15s, color .15s;
+}
+.update-check-link:hover:not(:disabled) { border-color: #3f3f46; color: #d4d4d8; }

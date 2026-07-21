@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, shell } = require("electron");
+const { app, BrowserWindow, ipcMain, shell, Notification, nativeImage } = require("electron");
 const fs = require("fs");
 const http = require("http");
 const path = require("path");
@@ -378,6 +378,37 @@ ipcMain.handle("window:focus", () => {
   mainWindow.focus();
   return true;
 });
+
+// --- Notificações -------------------------------------------------------
+
+const NOTIFICATION_ICON = nativeImage.createFromPath(path.join(__dirname, "icon.png"));
+
+// Notificação disparada pelo processo main (Electron Notification) — confiável
+// no Linux (libnotify), ao contrário da API Notification do renderer.
+ipcMain.handle("app:notify", (_event, payload = {}) => {
+  if (!Notification.isSupported()) return false;
+
+  const notification = new Notification({
+    title: String(payload.title || "Spotgino").slice(0, 120),
+    body: String(payload.body || "").slice(0, 240),
+    icon: NOTIFICATION_ICON.isEmpty() ? undefined : NOTIFICATION_ICON,
+    silent: false
+  });
+
+  notification.on("click", () => {
+    if (windowAlive()) {
+      if (mainWindow.isMinimized()) mainWindow.restore();
+      mainWindow.show();
+      mainWindow.focus();
+      mainWindow.webContents.send("notification-clicked");
+    }
+  });
+
+  notification.show();
+  return true;
+});
+
+ipcMain.handle("app:version", () => app.getVersion());
 
 app.whenReady().then(() => {
   migrateLegacyConfig();

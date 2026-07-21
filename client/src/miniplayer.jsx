@@ -34,10 +34,13 @@ export default function MiniPlayer({
   const progress = durationMs > 0 ? Math.min(100, (position / durationMs) * 100) : 0;
   const messages = room?.messages || [];
   const chatEndRef = useRef(null);
+  const lastMessageId = messages.length ? messages[messages.length - 1].id : null;
 
   useEffect(() => {
-    if (chatOpen) chatEndRef.current?.scrollIntoView({ block: "end" });
-  }, [chatOpen, messages.length]);
+    if (!chatOpen) return;
+    const box = chatEndRef.current?.parentElement;
+    if (box) box.scrollTop = box.scrollHeight;
+  }, [chatOpen, lastMessageId]);
 
   return (
     <main className={`mini-shell ${chatOpen ? "with-chat" : ""}`}>

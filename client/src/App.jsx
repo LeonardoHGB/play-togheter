@@ -18,9 +18,34 @@ import { useFriends, FriendsPanel, InviteToasts } from "./friends";
 import MiniPlayer, { MINI_SIZE, MINI_CHAT_SIZE } from "./miniplayer";
 import logo from "./assets/logo.png";
 
-const HOST_POLL_INTERVAL = 4500;
+const HOST_POLL_INTERVAL = 2500;
 const GUEST_DRIFT_INTERVAL = 15000;
 const FOLLOWER_DRIFT_TOLERANCE = 2200;
+
+const REPO_RELEASES_URL = "https://github.com/LeonardoHGB/play-togheter/releases";
+const RELEASES_API =
+  "https://api.github.com/repos/LeonardoHGB/play-togheter/releases/latest";
+
+function parseVersion(value) {
+  const match = String(value).match(/(\d+)\.(\d+)\.(\d+)/);
+  return match ? [Number(match[1]), Number(match[2]), Number(match[3])] : null;
+}
+
+function isNewerVersion(latest, current) {
+  const a = parseVersion(latest);
+  const b = parseVersion(current);
+  if (!a || !b) return false;
+  for (let i = 0; i < 3; i += 1) {
+    if (a[i] > b[i]) return true;
+    if (a[i] < b[i]) return false;
+  }
+  return false;
+}
+
+function openExternalUrl(url) {
+  if (window.electronAPI?.openExternal) window.electronAPI.openExternal(url);
+  else window.open(url, "_blank", "noopener,noreferrer");
+}
 
 function formatTime(milliseconds) {
   const totalSeconds = Math.max(0, Math.floor((milliseconds || 0) / 1000));
@@ -155,6 +180,8 @@ export default function App() {
   const [miniMode, setMiniMode] = useState(false);
   const [miniChatOpen, setMiniChatOpen] = useState(false);
   const [unreadMessages, setUnreadMessages] = useState(0);
+  const [appVersion, setAppVersion] = useState("3.0.0");
+  const [updateStatus, setUpdateStatus] = useState(null); // null | "checking" | {version,url}
   // undefined = ainda sem snapshot da sala; null = snapshot visto, sala vazia.
   const seenMessagesRef = useRef(undefined);
   const miniModeRef = useRef(false);
@@ -189,10 +216,19 @@ export default function App() {
   const spotifyDeviceIdRef = useRef(spotifyDeviceId);
   const hostPollingRef = useRef(false);
   const followerSyncRef = useRef(false);
+  const followerPendingRef = useRef(null);
+  const autoAdvancedFromRef = useRef(null);
+  const nextTrackRef = useRef(null);
+  const chatEndRef = useRef(null);
   const mountedRef = useRef(true);
 
   const isHost = Boolean(room && room.hostId === getSocket()?.id);
   const currentTrack = room?.playback?.track || null;
+
+  // Mantém a referência do nextTrack atual: o ticker do auto-avanço captura
+  // uma closure antiga (deps [seeking]) e chamaria um nextTrack com isHost/room
+  // do mount. Chamando via ref, sempre usamos a versão do render corrente.
+  nextTrackRef.current = nextTrack;
 
   const friendsHub = useFriends({
     socketConnected,
@@ -263,21 +299,67 @@ export default function App() {
     setUnreadMessages((count) => count + fresh.length);
 
     const last = fresh[fresh.length - 1];
-    try {
-      const notification = new Notification(`Spotgino — ${last.author}`, {
-        body: last.message,
-        icon: logo,
-        silent: false
+    if (window.electronAPI?.notify) {
+      // Processo main (libnotify) — confiável no Linux.
+      window.electronAPI.notify({
+        title: `Spotgino — ${last.author}`,
+        body: last.message
       });
-      notification.onclick = () => {
-        window.electronAPI?.focusWindow?.();
-        if (miniModeRef.current) setMiniChatOpen(true);
-        setUnreadMessages(0);
-      };
-    } catch {
-      // Notificações indisponíveis: o contador de não lidas já cobre.
+    } else {
+      try {
+        new Notification(`Spotgino — ${last.author}`, {
+          body: last.message,
+          icon: logo
+        });
+      } catch {
+        // Sem suporte a notificações: o contador de não lidas já cobre.
+      }
     }
   }, [room?.messages?.length, room, miniMode, miniChatOpen]);
+
+  // Clique na notificação (vindo do processo main): foca e abre o chat.
+  useEffect(() => {
+    if (!window.electronAPI?.onNotificationClick) return undefined;
+    return window.electronAPI.onNotificationClick(() => {
+      if (miniModeRef.current) setMiniChatOpen(true);
+      setUnreadMessages(0);
+    });
+  }, []);
+
+  useEffect(() => {
+    window.electronAPI?.getVersion?.().then((version) => {
+      if (version) setAppVersion(version);
+    });
+  }, []);
+
+  async function checkForUpdates() {
+    try {
+      setUpdateStatus("checking");
+      const response = await fetch(RELEASES_API, {
+        headers: { Accept: "application/vnd.github+json" }
+      });
+
+      if (response.status === 404) {
+        setUpdateStatus(null);
+        setNotice("Nenhuma release publicada ainda no GitHub.");
+        return;
+      }
+      if (!response.ok) throw new Error(`GitHub respondeu ${response.status}.`);
+
+      const data = await response.json();
+      const latest = String(data.tag_name || "").replace(/^v/i, "").trim();
+
+      if (latest && isNewerVersion(latest, appVersion)) {
+        setUpdateStatus({ version: latest, url: data.html_url || REPO_RELEASES_URL });
+      } else {
+        setUpdateStatus(null);
+        setNotice(`Você está na versão mais recente (${appVersion}).`);
+      }
+    } catch (error) {
+      setUpdateStatus(null);
+      setNotice(`Falha ao verificar atualização: ${error.message}`);
+    }
+  }
 
   // Em modo normal o chat é sempre visível: recuperar o foco marca como lido.
   useEffect(() => {
@@ -470,11 +552,25 @@ export default function App() {
   useEffect(() => {
     const timer = setInterval(() => {
       const playback = roomRef.current?.playback;
-      if (playback && !seeking) setPosition(expectedPosition(playback));
+      if (!playback || seeking) return;
+      const pos = expectedPosition(playback);
+      setPosition(pos);
+      maybeAutoAdvance(playback, pos);
     }, 250);
 
     return () => clearInterval(timer);
   }, [seeking]);
+
+  // Chat sempre acompanha a última mensagem. Depende do id da última mensagem
+  // (o length trava no cap de 80 do servidor) e rola só o container do chat,
+  // não a página inteira.
+  const lastMessageId = room?.messages?.length
+    ? room.messages[room.messages.length - 1].id
+    : null;
+  useEffect(() => {
+    const box = chatEndRef.current?.parentElement;
+    if (box) box.scrollTop = box.scrollHeight;
+  }, [lastMessageId]);
 
   useEffect(() => {
     if (!spotifyConnected || !room?.code || !isHost) return undefined;
@@ -600,14 +696,20 @@ export default function App() {
     }
   }
 
-  async function ensureSpotifyDevice() {
-    if (spotifyDeviceIdRef.current) return spotifyDeviceIdRef.current;
+  async function ensureSpotifyDevice(forceRefresh = false) {
+    if (!forceRefresh && spotifyDeviceIdRef.current) {
+      return spotifyDeviceIdRef.current;
+    }
 
     const payload = await spotifyApi.devices();
     const devices = (payload?.devices || []).filter(
       (device) => device.id && !device.is_restricted
     );
-    const selected = devices.find((device) => device.is_active) || devices[0];
+    const cached = spotifyDeviceIdRef.current;
+    const selected =
+      (cached && devices.find((device) => device.id === cached)) ||
+      devices.find((device) => device.is_active) ||
+      devices[0];
 
     setSpotifyDevices(devices);
 
@@ -622,57 +724,126 @@ export default function App() {
     return selected.id;
   }
 
+  function isDeviceError(error) {
+    // A mensagem de 404 do Spotify inclui "Device"/"dispositivo" quando o
+    // device sumiu; assim não confundimos com 404 de URI/faixa inexistente.
+    return /device|dispositivo|no active|no_active/i.test(error?.message || "");
+  }
+
+  // Executa um comando do Spotify garantindo um device válido. Se o device
+  // sumiu (comum quando o convidado fica ocioso), revalida e tenta de novo —
+  // era isso que exigia desconectar/reconectar o Spotify manualmente.
+  async function runWithDevice(action) {
+    const deviceId = await ensureSpotifyDevice();
+    try {
+      return await action(deviceId);
+    } catch (error) {
+      if (!isDeviceError(error)) throw error;
+      spotifyDeviceIdRef.current = "";
+      const freshDevice = await ensureSpotifyDevice(true);
+      return action(freshDevice);
+    }
+  }
+
   async function syncFollowerToRoom(playback) {
-    if (followerSyncRef.current || !playback?.track?.uri) return;
+    if (!playback?.track?.uri) return;
+
+    // Coalescing: se já há uma sincronização rodando, guarda apenas o estado
+    // mais recente e aplica quando a atual terminar — assim um pause/troca que
+    // chega no meio nunca é perdido (antes eram descartados até 15s depois).
+    if (followerSyncRef.current) {
+      followerPendingRef.current = playback;
+      return;
+    }
     followerSyncRef.current = true;
 
     try {
-      const deviceId = await ensureSpotifyDevice();
-      const local = await spotifyApi.currentPlayback();
-      const targetPosition = expectedPosition(playback);
-      const trackChanged = local?.track?.id !== playback.track.id;
-      const playbackStateChanged = local?.isPlaying !== playback.isPlaying;
-      const drift = Math.abs((local?.positionMs || 0) - targetPosition);
-
-      if (trackChanged) {
-        await spotifyApi.playTrack({
-          uri: playback.track.uri,
-          positionMs: targetPosition,
-          deviceId
-        });
-
-        if (!playback.isPlaying) {
-          await spotifyApi.pause({ deviceId });
-        }
-      } else if (playbackStateChanged) {
-        if (playback.isPlaying) {
-          await spotifyApi.playTrack({
-            uri: playback.track.uri,
-            positionMs: targetPosition,
-            deviceId
-          });
-        } else {
-          await spotifyApi.pause({ deviceId });
-        }
-      } else if (drift > FOLLOWER_DRIFT_TOLERANCE) {
-        await spotifyApi.seek({ positionMs: targetPosition, deviceId });
-      }
-
-      setSpotifyLocalPlayback(
-        playbackFromTrack(playback.track, {
-          isPlaying: playback.isPlaying,
-          positionMs: targetPosition,
-          deviceName: playback.deviceName
-        })
-      );
+      await applyFollowerPlayback(playback);
       setSpotifyError("");
     } catch (error) {
       setSpotifyError(`Sincronização do convidado: ${error.message}`);
     } finally {
-      window.setTimeout(() => {
-        followerSyncRef.current = false;
-      }, 900);
+      followerSyncRef.current = false;
+      const pending = followerPendingRef.current;
+      if (pending) {
+        followerPendingRef.current = null;
+        syncFollowerToRoom(pending);
+      }
     }
+  }
+
+  async function applyFollowerPlayback(playback) {
+    const targetPosition = expectedPosition(playback);
+
+    // Pause é aplicado direto, sem consultar o estado atual: menos latência.
+    if (!playback.isPlaying) {
+      try {
+        await runWithDevice((deviceId) => spotifyApi.pause({ deviceId }));
+      } catch (error) {
+        // 403 "Restriction violated" = já estava pausado: ignora. Outros 403
+        // (Premium, anúncio, device restrito) são falhas reais e sobem, para
+        // a UI não mentir que pausou enquanto o áudio continua.
+        const alreadyPaused =
+          error?.status === 403 && /restriction/i.test(error?.message || "");
+        if (!alreadyPaused) throw error;
+      }
+      setSpotifyLocalPlayback(
+        playbackFromTrack(playback.track, {
+          isPlaying: false,
+          positionMs: targetPosition,
+          deviceName: playback.deviceName
+        })
+      );
+      return;
+    }
+
+    const local = await spotifyApi.currentPlayback();
+    const trackChanged = local?.track?.id !== playback.track.id;
+    const drift = Math.abs((local?.positionMs || 0) - targetPosition);
+
+    if (trackChanged || !local?.isPlaying) {
+      await runWithDevice((deviceId) =>
+        spotifyApi.playTrack({
+          uri: playback.track.uri,
+          positionMs: targetPosition,
+          deviceId
+        })
+      );
+    } else if (drift > FOLLOWER_DRIFT_TOLERANCE) {
+      await runWithDevice((deviceId) =>
+        spotifyApi.seek({ positionMs: targetPosition, deviceId })
+      );
+    }
+
+    setSpotifyLocalPlayback(
+      playbackFromTrack(playback.track, {
+        isPlaying: true,
+        positionMs: targetPosition,
+        deviceName: playback.deviceName
+      })
+    );
+  }
+
+  // Host: avança a fila quando a faixa está terminando. Lê tudo fresco (evita
+  // usar o `position` do state, que fica um render atrás e pularia faixas) e
+  // dispara no máximo uma vez por faixa (não drena a fila se o play falhar).
+  function maybeAutoAdvance(playback, pos) {
+    const activeRoom = roomRef.current;
+    const amHost = activeRoom?.hostId === getSocket()?.id;
+
+    if (!amHost || playback.source !== "spotify") return;
+    if (!playback.isPlaying || !playback.durationMs) return;
+    if ((activeRoom?.queue?.length || 0) === 0) return;
+    if (pos < playback.durationMs - 1500) return;
+
+    // Chave por changedAt (instância da reprodução), não por track.id: assim a
+    // MESMA faixa tocada de novo (duplicata na fila / replay) recebe uma chave
+    // nova e volta a auto-avançar; e se o play falhar, a reprodução não muda,
+    // a chave continua igual e não drenamos a fila.
+    const key = playback.changedAt || null;
+    if (autoAdvancedFromRef.current === key) return;
+    autoAdvancedFromRef.current = key;
+    nextTrackRef.current?.();
   }
 
   async function connectSpotify() {
@@ -1120,6 +1291,22 @@ export default function App() {
             )}
           </button>
 
+          <button
+            className="update-check-link"
+            onClick={() =>
+              updateStatus && updateStatus !== "checking"
+                ? openExternalUrl(updateStatus.url)
+                : checkForUpdates()
+            }
+            disabled={updateStatus === "checking"}
+          >
+            {updateStatus === "checking"
+              ? "Verificando atualizações..."
+              : updateStatus
+                ? `⬆ Versão ${updateStatus.version} disponível — baixar`
+                : `⟳ Verificar atualizações · v${appVersion}`}
+          </button>
+
           {notice && <div className="notice">{notice}</div>}
           {connectionError && <div className="error-box">{connectionError}</div>}
         </section>
@@ -1321,6 +1508,23 @@ export default function App() {
           </div>
 
           <div className="topbar-actions">
+            {updateStatus && updateStatus !== "checking" && (
+              <button
+                className="update-pill"
+                onClick={() => openExternalUrl(updateStatus.url)}
+                title="Abrir a página de download"
+              >
+                ⬆ v{updateStatus.version} disponível
+              </button>
+            )}
+            <button
+              className="sync-now-button"
+              onClick={checkForUpdates}
+              disabled={updateStatus === "checking"}
+              title="Verificar atualizações no GitHub"
+            >
+              {updateStatus === "checking" ? "⟳ ..." : "⟳ Atualizar"}
+            </button>
             <button className="sync-now-button" onClick={enterMiniMode}>
               ▣ Mini player
             </button>
@@ -1537,6 +1741,7 @@ export default function App() {
                   </div>
                 </div>
               ))}
+              <div ref={chatEndRef} />
             </div>
 
             <form className="chat-form" onSubmit={sendMessage}>
