@@ -62,8 +62,8 @@ client/release/
 O usuário abre o aplicativo e clica em **Configurar servidor**. A configuração fica salva em:
 
 ```text
-Windows: %APPDATA%\Listen Together\config.json
-Linux:   ~/.config/Listen Together/config.json
+Windows: %APPDATA%\Spotgino\config.json
+Linux:   ~/.config/Spotgino/config.json
 ```
 
 Exemplo:

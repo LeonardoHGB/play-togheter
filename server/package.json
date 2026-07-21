@@ -1,8 +1,8 @@
 {
-  "name": "listen-together-server",
+  "name": "spotgino-server",
   "version": "3.0.0",
   "private": true,
-  "description": "API e Socket.IO do Listen Together.",
+  "description": "API e Socket.IO do Spotgino.",
   "main": "src/index.cjs",
   "engines": {
     "node": ">=20"

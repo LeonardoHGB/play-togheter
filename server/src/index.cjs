@@ -7,7 +7,7 @@ const db = require("./db.cjs");
 
 const PORT = Number(process.env.PORT || 3333);
 const HOST = process.env.HOST || "0.0.0.0";
-const SERVER_NAME = process.env.SERVER_NAME || "Listen Together";
+const SERVER_NAME = process.env.SERVER_NAME || "Spotgino";
 const MAX_ROOMS = Math.max(1, Number(process.env.MAX_ROOMS || 500));
 const MAX_MEMBERS_PER_ROOM = Math.max(2, Number(process.env.MAX_MEMBERS_PER_ROOM || 30));
 const ROOM_IDLE_TTL_MS = Math.max(60_000, Number(process.env.ROOM_IDLE_TTL_MS || 21_600_000));
@@ -237,7 +237,7 @@ app.get("/", (_request, response) => {
   response.json({
     name: SERVER_NAME,
     status: "online",
-    service: "listen-together-server"
+    service: "spotgino-server"
   });
 });
 

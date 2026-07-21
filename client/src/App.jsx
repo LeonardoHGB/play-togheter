@@ -15,6 +15,8 @@ import {
   spotifyApi
 } from "./spotify";
 import { useFriends, FriendsPanel, InviteToasts } from "./friends";
+import MiniPlayer, { MINI_SIZE, MINI_CHAT_SIZE } from "./miniplayer";
+import logo from "./assets/logo.png";
 
 const HOST_POLL_INTERVAL = 4500;
 const GUEST_DRIFT_INTERVAL = 15000;
@@ -111,8 +113,8 @@ function ServerSettingsModal({
         </div>
 
         <p className="settings-description">
-          Informe o endereço público configurado no Portainer. Exemplo:
-          <code>https://listen-api.seudominio.com</code>
+          Informe o endereço do servidor Spotgino. Exemplo:
+          <code>http://192.168.230.217:3333</code>
         </p>
 
         <label>
@@ -120,7 +122,7 @@ function ServerSettingsModal({
           <input
             value={value}
             onChange={(event) => onChange(event.target.value)}
-            placeholder="https://listen-api.seudominio.com"
+            placeholder="http://192.168.230.217:3333"
             autoFocus
           />
         </label>
@@ -150,6 +152,12 @@ export default function App() {
   const [serverDraft, setServerDraft] = useState("");
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [friendsOpen, setFriendsOpen] = useState(false);
+  const [miniMode, setMiniMode] = useState(false);
+  const [miniChatOpen, setMiniChatOpen] = useState(false);
+  const [unreadMessages, setUnreadMessages] = useState(0);
+  // undefined = ainda sem snapshot da sala; null = snapshot visto, sala vazia.
+  const seenMessagesRef = useRef(undefined);
+  const miniModeRef = useRef(false);
   const [serverTestStatus, setServerTestStatus] = useState({ ok: false, message: "" });
   const [savingServer, setSavingServer] = useState(false);
   const [socketConnected, setSocketConnected] = useState(false);
@@ -193,12 +201,119 @@ export default function App() {
     notify: setNotice
   });
 
+  // Redimensiona a janela do Electron conforme o modo mini/chat (Win e Linux).
+  // Dep booleana: `room` muda de identidade a cada room:state e re-invocaria
+  // o IPC de resize a cada mensagem de chat/poll do host.
+  const inRoom = Boolean(room);
+  useEffect(() => {
+    if (!window.electronAPI?.setMiniWindow) return;
+    if (miniMode && inRoom) {
+      window.electronAPI.setMiniWindow(miniChatOpen ? MINI_CHAT_SIZE : MINI_SIZE);
+    }
+  }, [miniMode, miniChatOpen, inRoom]);
+
+  // Saiu da sala: garante que a janela volta ao tamanho normal.
+  useEffect(() => {
+    if (!room && miniMode) {
+      setMiniMode(false);
+      setMiniChatOpen(false);
+      window.electronAPI?.restoreWindow?.();
+    }
+  }, [room, miniMode]);
+
+  // Notificações de chat: mensagens novas de outras pessoas quando o chat não
+  // está visível (modo mini com chat fechado, ou janela sem foco).
+  // Rastreadas pelo id da última mensagem vista: o servidor envia só as últimas
+  // 80, então contagem por tamanho deixaria de detectar novidades no cap.
+  useEffect(() => {
+    miniModeRef.current = miniMode;
+  }, [miniMode]);
+
+  useEffect(() => {
+    const messages = room?.messages || [];
+
+    if (!room) {
+      seenMessagesRef.current = undefined;
+      setUnreadMessages(0);
+      return;
+    }
+
+    const lastId = messages[messages.length - 1]?.id ?? null;
+
+    // Primeiro snapshot da sala: histórico não conta como novidade.
+    if (seenMessagesRef.current === undefined) {
+      seenMessagesRef.current = lastId;
+      return;
+    }
+
+    if (lastId === null || lastId === seenMessagesRef.current) return;
+
+    const seenIndex = messages.findIndex(
+      (message) => message.id === seenMessagesRef.current
+    );
+    const fresh = messages
+      .slice(seenIndex + 1)
+      .filter((message) => message.memberId !== getSocket()?.id);
+    seenMessagesRef.current = lastId;
+    if (!fresh.length) return;
+
+    const chatVisible = miniMode ? miniChatOpen : document.hasFocus();
+    if (chatVisible) return;
+
+    setUnreadMessages((count) => count + fresh.length);
+
+    const last = fresh[fresh.length - 1];
+    try {
+      const notification = new Notification(`Spotgino — ${last.author}`, {
+        body: last.message,
+        icon: logo,
+        silent: false
+      });
+      notification.onclick = () => {
+        window.electronAPI?.focusWindow?.();
+        if (miniModeRef.current) setMiniChatOpen(true);
+        setUnreadMessages(0);
+      };
+    } catch {
+      // Notificações indisponíveis: o contador de não lidas já cobre.
+    }
+  }, [room?.messages?.length, room, miniMode, miniChatOpen]);
+
+  // Em modo normal o chat é sempre visível: recuperar o foco marca como lido.
+  useEffect(() => {
+    function onFocus() {
+      if (!miniModeRef.current) setUnreadMessages(0);
+    }
+    window.addEventListener("focus", onFocus);
+    return () => window.removeEventListener("focus", onFocus);
+  }, []);
+
+  function enterMiniMode() {
+    setUnreadMessages(0);
+    setMiniMode(true);
+  }
+
+  function exitMiniMode() {
+    setMiniMode(false);
+    setMiniChatOpen(false);
+    setUnreadMessages(0);
+    window.electronAPI?.restoreWindow?.();
+  }
+
+  function toggleMiniChat() {
+    setMiniChatOpen((open) => {
+      if (!open) setUnreadMessages(0);
+      return !open;
+    });
+  }
+
   useEffect(() => {
     let cancelled = false;
 
     async function initializeRuntime() {
       try {
         const fallback =
+          localStorage.getItem("spotgino_server_url") ||
           localStorage.getItem("listen_together_server_url") ||
           import.meta.env.VITE_DEFAULT_SERVER_URL ||
           "http://127.0.0.1:3333";
@@ -252,6 +367,26 @@ export default function App() {
     const onConnect = () => {
       setSocketConnected(true);
       setConnectionError("");
+
+      // Reconexão com sala ativa: o socket ganhou um id novo e o servidor já
+      // nos removeu da sala. Tenta reentrar; se a sala morreu, volta ao lobby
+      // (o que também restaura a janela se estiver em modo mini).
+      const activeRoom = roomRef.current;
+      if (activeRoom?.code) {
+        activeSocket.emit(
+          "room:join",
+          {
+            code: activeRoom.code,
+            displayName: localStorage.getItem("display_name") || "Convidado"
+          },
+          (result) => {
+            if (!result?.ok) {
+              setRoom(null);
+              setNotice("A conexão caiu e a sala não existe mais.");
+            }
+          }
+        );
+      }
     };
     const onDisconnect = () => setSocketConnected(false);
     const onConnectError = (error) => {
@@ -862,7 +997,7 @@ export default function App() {
       if (window.electronAPI?.saveServerUrl) {
         await window.electronAPI.saveServerUrl(normalized);
       } else {
-        localStorage.setItem("listen_together_server_url", normalized);
+        localStorage.setItem("spotgino_server_url", normalized);
       }
 
       setRoom(null);
@@ -899,9 +1034,9 @@ export default function App() {
       <main className="landing">
         <section className="hero-card loading-card">
           <div className="brand">
-            <div className="logo">♫</div>
+            <img className="logo" src={logo} alt="Spotgino" />
             <div>
-              <strong>Listen Together</strong>
+              <strong>Spotgino</strong>
               <span>Carregando configuração...</span>
             </div>
           </div>
@@ -916,9 +1051,9 @@ export default function App() {
       <main className="landing">
         <section className="hero-card">
           <div className="brand">
-            <div className="logo">♫</div>
+            <img className="logo" src={logo} alt="Spotgino" />
             <div>
-              <strong>Listen Together</strong>
+              <strong>Spotgino</strong>
               <span>Electron + Spotify Connect</span>
             </div>
           </div>
@@ -1024,14 +1159,42 @@ export default function App() {
     );
   }
 
+  if (miniMode) {
+    return (
+      <>
+        <MiniPlayer
+          room={room}
+          track={currentTrack}
+          position={position}
+          isHost={isHost}
+          spotifyBusy={spotifyBusy}
+          chatOpen={miniChatOpen}
+          unread={unreadMessages}
+          chatMessage={chatMessage}
+          onChatMessageChange={setChatMessage}
+          onToggleChat={toggleMiniChat}
+          onTogglePlay={togglePlayback}
+          onNext={nextTrack}
+          onSendMessage={sendMessage}
+          onExpand={exitMiniMode}
+        />
+        <InviteToasts
+          invites={friendsHub.invites}
+          onAccept={friendsHub.acceptInvite}
+          onDismiss={friendsHub.dismissInvite}
+        />
+      </>
+    );
+  }
+
   return (
     <>
     <main className="app-shell">
       <aside className="sidebar">
         <div className="brand compact">
-          <div className="logo">♫</div>
+          <img className="logo" src={logo} alt="Spotgino" />
           <div>
-            <strong>Listen Together</strong>
+            <strong>Spotgino</strong>
             <span>Sala {room.code}</span>
           </div>
         </div>
@@ -1158,6 +1321,9 @@ export default function App() {
           </div>
 
           <div className="topbar-actions">
+            <button className="sync-now-button" onClick={enterMiniMode}>
+              ▣ Mini player
+            </button>
             <button className="sync-now-button" onClick={openServerSettings}>
               ⚙ Servidor
             </button>

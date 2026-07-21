@@ -5,10 +5,25 @@ const path = require("path");
 
 const CALLBACK_HOST = "127.0.0.1";
 const CALLBACK_PORT = 43821;
-const DEFAULT_SERVER_URL = process.env.LISTEN_TOGETHER_SERVER_URL || "http://192.168.230.217:3333";
+const DEFAULT_SERVER_URL =
+  process.env.SPOTGINO_SERVER_URL ||
+  process.env.LISTEN_TOGETHER_SERVER_URL ||
+  "http://192.168.230.217:3333";
+const NORMAL_MIN_WIDTH = 980;
+const NORMAL_MIN_HEIGHT = 680;
+
+// Define o nome do app (e portanto a pasta de userData: %APPDATA%\Spotgino no
+// Windows, ~/.config/Spotgino no Linux). Sem isso o Electron usaria o campo
+// "name" do package.json ("spotgino-client").
+app.setName("Spotgino");
+
+// Necessário para notificações (toasts) funcionarem no Windows.
+app.setAppUserModelId("com.joaovitor.spotgino");
 
 let mainWindow;
 let spotifyCallbackServer;
+let savedNormalBounds = null;
+let savedWasMaximized = false;
 
 function normalizeServerUrl(value) {
   const raw = String(value || "").trim().replace(/\/+$/, "");
@@ -27,6 +42,28 @@ const CONFIG_VERSION = 2;
 // abstraída por app.getPath("userData").
 function getConfigPath() {
   return path.join(app.getPath("userData"), "config.json");
+}
+
+// Migra a config salva por versões anteriores ao rebrand, para não perder a
+// conta de amigo nem a URL do servidor. O nome da pasta antiga era derivado do
+// "name" do package.json ("listen-together-client"); "Listen Together" fica
+// como candidato extra por segurança.
+const LEGACY_CONFIG_DIRS = ["listen-together-client", "Listen Together"];
+
+function migrateLegacyConfig() {
+  try {
+    const newPath = getConfigPath();
+    if (fs.existsSync(newPath)) return;
+    for (const dir of LEGACY_CONFIG_DIRS) {
+      const legacyPath = path.join(app.getPath("appData"), dir, "config.json");
+      if (!fs.existsSync(legacyPath)) continue;
+      fs.mkdirSync(path.dirname(newPath), { recursive: true });
+      fs.copyFileSync(legacyPath, newPath);
+      return;
+    }
+  } catch (error) {
+    console.error("Falha ao migrar config antiga:", error);
+  }
 }
 
 function readRawConfig() {
@@ -133,7 +170,7 @@ function callbackHtml({ success, title, message }) {
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Listen Together</title>
+  <title>Spotgino</title>
   <style>
     * { box-sizing: border-box; }
     body { min-height:100vh; margin:0; display:grid; place-items:center; padding:24px; background:#09090b; color:#fafafa; font-family:Inter,system-ui,sans-serif; }
@@ -206,7 +243,7 @@ function startSpotifyCallbackServer() {
       sendCallbackResponse(response, 200, {
         success: true,
         title: "Spotify conectado",
-        message: "O Listen Together recebeu a autorização com sucesso."
+        message: "O Spotgino recebeu a autorização com sucesso."
       });
     } catch (error) {
       console.error("Erro ao processar callback do Spotify:", error);
@@ -231,8 +268,8 @@ function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1280,
     height: 820,
-    minWidth: 980,
-    minHeight: 680,
+    minWidth: NORMAL_MIN_WIDTH,
+    minHeight: NORMAL_MIN_HEIGHT,
     backgroundColor: "#09090b",
     titleBarStyle: "hiddenInset",
     webPreferences: {
@@ -253,6 +290,18 @@ function createWindow() {
     if (url.startsWith("https://")) shell.openExternal(url);
     return { action: "deny" };
   });
+
+  // Reload do renderer (Ctrl+R/crash) zera o estado do React: se a janela
+  // ficou no formato mini, restaura o formato normal.
+  mainWindow.webContents.on("did-finish-load", () => {
+    if (savedNormalBounds) restoreNormalWindow();
+  });
+
+  mainWindow.on("closed", () => {
+    mainWindow = null;
+    savedNormalBounds = null;
+    savedWasMaximized = false;
+  });
 }
 
 ipcMain.handle("open-external", async (_event, url) => {
@@ -269,7 +318,69 @@ ipcMain.handle("app-config:test-server", (_event, serverUrl) => testServer(serve
 ipcMain.handle("app-account:save", (_event, account) => writeAccount(account));
 ipcMain.handle("app-account:clear", () => writeAccount(null));
 
+// --- Modo mini player ---------------------------------------------------
+
+function windowAlive() {
+  return Boolean(mainWindow && !mainWindow.isDestroyed());
+}
+
+function restoreNormalWindow() {
+  if (!windowAlive()) return false;
+  mainWindow.setAlwaysOnTop(false);
+  mainWindow.setResizable(true);
+  mainWindow.setMinimumSize(NORMAL_MIN_WIDTH, NORMAL_MIN_HEIGHT);
+  if (savedNormalBounds) {
+    mainWindow.setBounds(savedNormalBounds);
+    savedNormalBounds = null;
+  }
+  if (savedWasMaximized) {
+    mainWindow.maximize();
+    savedWasMaximized = false;
+  }
+  return true;
+}
+
+ipcMain.handle("window:mini", (_event, size) => {
+  if (!windowAlive()) return false;
+  const width = Math.max(320, Math.round(Number(size?.width) || 400));
+  const height = Math.max(140, Math.round(Number(size?.height) || 190));
+
+  // Sai de fullscreen/maximizado antes de medir e redimensionar.
+  if (mainWindow.isFullScreen()) mainWindow.setFullScreen(false);
+  if (mainWindow.isMaximized()) {
+    if (!savedNormalBounds) {
+      savedNormalBounds = mainWindow.getNormalBounds();
+      savedWasMaximized = true;
+    }
+    mainWindow.unmaximize();
+  } else if (!savedNormalBounds) {
+    savedNormalBounds = mainWindow.getBounds();
+    savedWasMaximized = false;
+  }
+
+  // Ordem importa no Windows: setResizable(false) fixa min=max no tamanho
+  // atual, então o resize precisa vir antes. setContentSize garante que a
+  // área útil (CSS) é idêntica em Windows e Linux, independente do frame.
+  mainWindow.setMinimumSize(320, 140);
+  mainWindow.setResizable(true);
+  mainWindow.setContentSize(width, height);
+  mainWindow.setResizable(false);
+  mainWindow.setAlwaysOnTop(true, "floating");
+  return true;
+});
+
+ipcMain.handle("window:restore", () => restoreNormalWindow());
+
+ipcMain.handle("window:focus", () => {
+  if (!windowAlive()) return false;
+  if (mainWindow.isMinimized()) mainWindow.restore();
+  mainWindow.show();
+  mainWindow.focus();
+  return true;
+});
+
 app.whenReady().then(() => {
+  migrateLegacyConfig();
   startSpotifyCallbackServer();
   createWindow();
 

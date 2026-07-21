@@ -1,8 +1,8 @@
 {
-  "name": "listen-together-client",
+  "name": "spotgino-client",
   "version": "3.0.0",
   "private": true,
-  "description": "Cliente desktop Electron do Listen Together.",
+  "description": "Cliente desktop Electron do Spotgino.",
   "main": "electron/main.cjs",
   "engines": {
     "node": ">=20"
@@ -31,15 +31,16 @@
     "wait-on": "^9.0.3"
   },
   "build": {
-    "appId": "com.joaovitor.listentogether",
-    "productName": "Listen Together",
+    "appId": "com.joaovitor.spotgino",
+    "productName": "Spotgino",
     "files": [
       "dist/**/*",
       "electron/**/*",
       "package.json"
     ],
     "directories": {
-      "output": "release"
+      "output": "release",
+      "buildResources": "build"
     },
     "linux": {
       "target": [
@@ -47,19 +48,21 @@
         "deb"
       ],
       "category": "AudioVideo",
-      "artifactName": "Listen-Together-${version}-${arch}.${ext}"
+      "icon": "build/icon.png",
+      "artifactName": "Spotgino-${version}-${arch}.${ext}"
     },
     "win": {
       "target": [
         "nsis",
         "portable"
-      ]
+      ],
+      "icon": "build/icon.png"
     },
     "nsis": {
-      "artifactName": "Listen-Together-Setup-${version}-${arch}.${ext}"
+      "artifactName": "Spotgino-Setup-${version}-${arch}.${ext}"
     },
     "portable": {
-      "artifactName": "Listen-Together-Portable-${version}-${arch}.${ext}"
+      "artifactName": "Spotgino-Portable-${version}-${arch}.${ext}"
     }
   }
 }

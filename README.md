@@ -1,4 +1,4 @@
-# Listen Together v3 — Electron + Spotify + Docker
+# Spotgino v3 — Electron + Spotify + Docker
 
 Salas sincronizadas usando Spotify Connect. O host toca; os amigos ouvem juntos, cada um na própria conta Spotify.
 
@@ -12,6 +12,7 @@ Salas sincronizadas usando Spotify Connect. O host toca; os amigos ouvem juntos,
 - **Contas persistentes com código de amigo** (SQLite no servidor).
 - **Aba de Amigos**: adicionar por código, aceitar/recusar pedidos, ver quem está online.
 - **Convites de sala**: convide um amigo online e ele entra com um clique.
+- **Mini player**: janela compacta sempre visível, com chat lateral e notificações de mensagens.
 - Builds para **Windows** (instalador + portátil) e **Linux** (AppImage + deb).
 
 ## Arquitetura
@@ -83,8 +84,10 @@ Libere a porta `3333/TCP` no firewall. A URL usada nos aplicativos será `http:/
 ```bash
 cd /opt/play-togheter
 git pull
-docker compose -f portainer-stack.yml up -d --build
+docker compose -f portainer-stack.yml up -d --build --remove-orphans
 ```
+
+(O `--remove-orphans` limpa o container antigo `listen-together-server`, substituído pelo `spotgino-server` no rebrand.)
 
 ### Persistência
 
@@ -97,7 +100,7 @@ Contas e amizades ficam no volume Docker `listen_together_data` (SQLite). **Não
 | `PORT` | `3333` | Porta interna do Node.js. |
 | `HOST` | `0.0.0.0` | Interface de rede. |
 | `PUBLIC_PORT` | `3333` | Porta publicada no host. |
-| `SERVER_NAME` | `Listen Together` | Nome mostrado no health check. |
+| `SERVER_NAME` | `Spotgino` | Nome mostrado no health check. |
 | `ALLOWED_ORIGINS` | `*` | Lista separada por vírgulas. |
 | `MAX_ROOMS` | `500` | Limite de salas simultâneas. |
 | `MAX_MEMBERS_PER_ROOM` | `30` | Limite de participantes por sala. |
@@ -148,9 +151,9 @@ docker run --rm -v /opt/play-togheter/client:/project -w /project \
   bash -c "npm install --no-audit --no-fund && npm run build:linux"
 ```
 
-Os arquivos saem em `client/release/`: `Listen Together Setup <versão>.exe` (instalador), `Listen Together <versão>.exe` (portátil), `Listen-Together-<versão>-x86_64.AppImage` e `Listen-Together-<versão>-amd64.deb`.
+Os arquivos saem em `client/release/`: `Spotgino-Setup-<versão>-x64.exe` (instalador), `Spotgino-Portable-<versão>-x64.exe` (portátil), `Spotgino-<versão>-x86_64.AppImage` e `Spotgino-<versão>-amd64.deb`.
 
-O mesmo executável serve para todos: cada pessoa configura a URL do servidor dentro do app (fica salva em `%APPDATA%\Listen Together\config.json` no Windows e `~/.config/Listen Together/config.json` no Linux — mesmo formato nos dois).
+O mesmo executável serve para todos: cada pessoa configura a URL do servidor dentro do app (fica salva em `%APPDATA%\Spotgino\config.json` no Windows e `~/.config/Spotgino/config.json` no Linux — mesmo formato nos dois).
 
 ## Fluxo do usuário
 
@@ -165,6 +168,12 @@ O mesmo executável serve para todos: cada pessoa configura a URL do servidor de
 - O tráfego é HTTP em rede local. Para expor na internet, adicione HTTPS (proxy reverso) e restrinja `ALLOWED_ORIGINS`.
 - Não exponha Client Secret no Electron (o fluxo PKCE não usa secret).
 - Para múltiplas réplicas seriam necessários Redis + adapter do Socket.IO.
+
+## Limitações conhecidas
+
+- Quem tinha o app antigo **Listen Together** instalado deve desinstalá-lo — o Spotgino instala em paralelo (identidade nova) e a config é migrada automaticamente no primeiro uso.
+- No Linux sob **Wayland** (GNOME padrão), o compositor ignora "sempre visível": o mini player funciona, mas pode ficar atrás de outras janelas. Em X11 funciona normalmente.
+- No build **portátil** do Windows, as notificações toast podem não aparecer (limitação do Windows para apps sem instalação); o contador de mensagens não lidas cobre esse caso. O instalador não tem essa limitação.
 
 ## Comandos úteis
 

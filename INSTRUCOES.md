@@ -1,4 +1,4 @@
-# Instruções rápidas — Listen Together
+# Instruções rápidas — Spotgino
 
 ## Parte 1 — subir o servidor
 
@@ -28,8 +28,10 @@ Para atualizar depois:
 ```bash
 cd /opt/play-togheter
 git pull
-docker compose -f portainer-stack.yml up -d --build
+docker compose -f portainer-stack.yml up -d --build --remove-orphans
 ```
+
+> O `--remove-orphans` remove o container antigo `listen-together-server` (o serviço foi renomeado para `spotgino-server` no rebrand). Sem ele, o container velho continua ocupando a porta 3333.
 
 > As contas e amizades ficam no volume Docker `listen_together_data` — não apague esse volume.
 
@@ -93,8 +95,8 @@ Os arquivos ficam em `client/release/`.
 ## Onde fica a configuração do aplicativo
 
 ```text
-Windows: %APPDATA%\Listen Together\config.json
-Linux:   ~/.config/Listen Together/config.json
+Windows: %APPDATA%\Spotgino\config.json
+Linux:   ~/.config/Spotgino/config.json
 ```
 
 O mesmo arquivo (mesmo formato) guarda a URL do servidor e a conta de amigo. Não é necessário gerar um instalador diferente para cada servidor — a URL pode ser trocada dentro do aplicativo.

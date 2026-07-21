@@ -1,15 +1,15 @@
 services:
-  listen-together-server:
+  spotgino-server:
     build:
       context: ./server
       dockerfile: Dockerfile
-    container_name: listen-together-server
+    container_name: spotgino-server
     restart: unless-stopped
     environment:
       NODE_ENV: production
       HOST: 0.0.0.0
       PORT: 3333
-      SERVER_NAME: "${SERVER_NAME:-Listen Together}"
+      SERVER_NAME: "${SERVER_NAME:-Spotgino}"
       ALLOWED_ORIGINS: "${ALLOWED_ORIGINS:-*}"
       MAX_ROOMS: "${MAX_ROOMS:-500}"
       MAX_MEMBERS_PER_ROOM: "${MAX_MEMBERS_PER_ROOM:-30}"

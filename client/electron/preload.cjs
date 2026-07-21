@@ -7,6 +7,9 @@ contextBridge.exposeInMainWorld("electronAPI", {
   testServerUrl: (serverUrl) => ipcRenderer.invoke("app-config:test-server", serverUrl),
   saveAccount: (account) => ipcRenderer.invoke("app-account:save", account),
   clearAccount: () => ipcRenderer.invoke("app-account:clear"),
+  setMiniWindow: (size) => ipcRenderer.invoke("window:mini", size),
+  restoreWindow: () => ipcRenderer.invoke("window:restore"),
+  focusWindow: () => ipcRenderer.invoke("window:focus"),
   platform: process.platform,
   onSpotifyCallback: (callback) => {
     const listener = (_event, payload) => callback(payload);
