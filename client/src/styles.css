@@ -104,6 +104,51 @@ input:focus, select:focus { border-color: #22c55e; box-shadow: 0 0 0 3px rgba(34
 }
 .primary-button { width: 100%; margin-top: 16px; color: #052e16; background: #22c55e; }
 .secondary-button { color: #fafafa; background: #3f3f46; }
+/* Gate de login: aparece na tela inicial antes de vincular o Spotify. */
+.login-gate { margin-top: 20px; }
+.login-gate-copy { color: #a1a1aa; line-height: 1.6; font-size: 14px; margin: 0 0 16px; }
+.spotify-login-button {
+  width: 100%;
+  border: 0;
+  border-radius: 999px;
+  padding: 15px 18px;
+  font-size: 15px;
+  font-weight: 800;
+  color: #052e16;
+  background: #1DB954;
+  cursor: pointer;
+  transition: transform 0.15s ease, box-shadow 0.2s ease, background 0.2s ease;
+  box-shadow: 0 8px 24px rgba(29, 185, 84, 0.25);
+}
+.spotify-login-button:hover:not(:disabled) {
+  background: #1ed760;
+  transform: translateY(-1px);
+  box-shadow: 0 10px 30px rgba(29, 185, 84, 0.38);
+}
+.spotify-login-button:disabled { opacity: 0.6; cursor: default; }
+
+/* Saudacao com a conta logada (avatar + nome vindos do Spotify). */
+.account-welcome {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 20px 0 4px;
+  padding: 12px 14px;
+  border: 1px solid #27272a;
+  border-radius: 14px;
+  background: #18181b;
+}
+.account-welcome .avatar { width: 42px; height: 42px; }
+.account-welcome-eyebrow {
+  display: block;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #22c55e;
+  margin-bottom: 2px;
+}
+.account-welcome strong { font-size: 16px; }
+
 .divider { display: flex; align-items: center; margin: 24px 0; color: #71717a; font-size: 12px; }
 .divider::before, .divider::after { content: ""; height: 1px; background: #27272a; flex: 1; }
 .divider span { padding: 0 12px; }
