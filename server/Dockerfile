@@ -12,10 +12,10 @@ RUN npm ci --omit=dev --no-audit --no-fund && npm cache clean --force
 
 COPY src ./src
 
-# Diretório persistido via volume (contas e amizades ficam aqui).
-RUN mkdir -p /app/data && chown -R node:node /app
+# Diretório do banco (persistido via volume no deploy). O container roda como
+# root para conseguir gravar no volume do Railway, que é montado como root.
+RUN mkdir -p /app/data
 
-USER node
 EXPOSE 3333
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \

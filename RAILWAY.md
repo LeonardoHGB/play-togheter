@@ -36,14 +36,14 @@ Em **Variables**, defina (veja `server/.env.example` para a lista completa):
 | `MAX_ROOMS` | `500` | opcional |
 | `MAX_MEMBERS_PER_ROOM` | `30` | opcional |
 | `ROOM_IDLE_TTL_MS` | `21600000` | opcional (6h) |
-| `RAILWAY_RUN_UID` | `0` | **veja aviso abaixo** |
 
 > ⚠️ **NÃO** defina `PORT` no Railway. O Railway injeta o `PORT` sozinho e o app
 > já lê `process.env.PORT`. Definir manualmente quebra o roteamento.
 
-> ⚠️ **`RAILWAY_RUN_UID=0`**: o `Dockerfile` roda como usuário `node` (não-root), mas o
-> volume do Railway é montado como root. Sem isso o SQLite falha com `EACCES` ao gravar.
-> Definir `RAILWAY_RUN_UID=0` faz o processo rodar como root e conseguir escrever no volume.
+> ℹ️ **Permissão do volume:** o container roda como root, então grava no volume do
+> Railway (montado como root) sem precisar de config extra. Se por algum motivo
+> aparecer erro de permissão (`SQLITE_CANTOPEN`/`EACCES`), confirme que o volume
+> está montado em `/app/data` e que o `DB_FILE` aponta pra dentro dele.
 
 ## 4. Domínio público
 
