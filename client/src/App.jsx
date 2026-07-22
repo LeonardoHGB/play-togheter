@@ -292,11 +292,6 @@ export default function App() {
     listeningToRef.current = listeningTo?.userId || null;
   }, [listeningTo]);
 
-  // Ordena o dashboard: quem está ouvindo algo primeiro, depois online, depois offline.
-  const sortedFriends = [...friendsHub.friends].sort((a, b) => {
-    const rank = (f) => (f.online && f.nowPlaying ? 0 : f.online ? 1 : 2);
-    return rank(a) - rank(b) || a.displayName.localeCompare(b.displayName);
-  });
 
   // Redimensiona a janela do Electron conforme o modo mini/chat (Win e Linux).
   // Dep booleana: `room` muda de identidade a cada room:state e re-invocaria
@@ -1448,89 +1443,6 @@ export default function App() {
                 </div>
               </div>
 
-              <section className="friends-dashboard">
-                <div className="friends-dashboard-head">
-                  <span>Amigos</span>
-                  <button
-                    className="ghost-button dashboard-manage"
-                    onClick={() => setFriendsOpen(true)}
-                  >
-                    Gerenciar
-                    {friendsHub.incoming.length > 0 && (
-                      <span className="friends-badge">{friendsHub.incoming.length}</span>
-                    )}
-                  </button>
-                </div>
-
-                {sortedFriends.length === 0 ? (
-                  <p className="friends-dashboard-empty">
-                    Você ainda não tem amigos. Toque em Gerenciar para adicionar pelo código.
-                  </p>
-                ) : (
-                  <div className="friends-dashboard-list">
-                    {sortedFriends.map((friend) => {
-                      const canListen = Boolean(friend.online && friend.nowPlaying);
-                      const active = listeningTo?.userId === friend.userId;
-                      return (
-                        <button
-                          key={friend.userId}
-                          className={`friend-card${canListen ? " playing" : ""}${active ? " active" : ""}`}
-                          onClick={() =>
-                            canListen &&
-                            (active
-                              ? stopListening()
-                              : listenAlong(friend.userId, friend.displayName))
-                          }
-                          disabled={!canListen}
-                          title={
-                            canListen
-                              ? active
-                                ? "Parar de ouvir junto"
-                                : "Ouvir junto"
-                              : friend.online
-                                ? "Online"
-                                : "Offline"
-                          }
-                        >
-                          <div className="avatar-wrap">
-                            {friend.avatarUrl ? (
-                              <img
-                                className="avatar"
-                                src={friend.avatarUrl}
-                                alt=""
-                                referrerPolicy="no-referrer"
-                              />
-                            ) : (
-                              <div className="avatar">
-                                {friend.displayName.slice(0, 1).toUpperCase()}
-                              </div>
-                            )}
-                            <span className={`presence-dot ${friend.online ? "online" : ""}`} />
-                          </div>
-                          <div className="friend-card-info">
-                            <strong>{friend.displayName}</strong>
-                            {canListen ? (
-                              <span className="friend-now-playing">
-                                ♪ {friend.nowPlaying.title}
-                              </span>
-                            ) : (
-                              <span>{friend.online ? "Online" : "Offline"}</span>
-                            )}
-                          </div>
-                          {canListen && (
-                            <span className="friend-card-action">
-                              {active ? "Parar" : "Ouvir junto"}
-                            </span>
-                          )}
-                        </button>
-                      );
-                    })}
-                  </div>
-                )}
-              </section>
-
-              <div className="divider"><span>salas</span></div>
-
               <button
                 className="primary-button"
                 onClick={createRoom}
@@ -1539,11 +1451,13 @@ export default function App() {
                 {friendsHub.account ? "Criar nova sala" : "Entrando na sua conta..."}
               </button>
 
+              <div className="divider"><span>ou entrar com código</span></div>
+
               <div className="join-row">
                 <input
                   value={roomCode}
                   onChange={(event) => setRoomCode(event.target.value.toUpperCase())}
-                  placeholder="Código da sala (ex: A1B2C3)"
+                  placeholder="EX: A1B2C3"
                   maxLength={6}
                 />
                 <button
@@ -1554,6 +1468,13 @@ export default function App() {
                   Entrar
                 </button>
               </div>
+
+              <button className="friends-button" onClick={() => setFriendsOpen(true)}>
+                <span>Amigos</span>
+                {friendsHub.incoming.length > 0 && (
+                  <span className="friends-badge">{friendsHub.incoming.length}</span>
+                )}
+              </button>
             </>
           )}
 
