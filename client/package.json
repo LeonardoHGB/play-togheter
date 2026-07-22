@@ -1,13 +1,13 @@
 {
   "name": "spotgino-client",
-  "version": "3.1.0",
+  "version": "3.1.1",
   "private": true,
   "description": "Cliente desktop Electron do Spotgino.",
   "author": {
     "name": "Spotgino",
     "email": "desenvolvimentosoften2@gmail.com"
   },
-  "homepage": "https://github.com/LeonardoHGB/play-togheter",
+  "homepage": "https://github.com/LeonardoHGB/Spotgino",
   "main": "electron/main.cjs",
   "engines": {
     "node": ">=20"

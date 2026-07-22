@@ -39,9 +39,9 @@ const HOST_POLL_INTERVAL = 2500;
 const GUEST_DRIFT_INTERVAL = 15000;
 const FOLLOWER_DRIFT_TOLERANCE = 2200;
 
-const REPO_RELEASES_URL = "https://github.com/LeonardoHGB/play-togheter/releases";
+const REPO_RELEASES_URL = "https://github.com/LeonardoHGB/Spotgino/releases";
 const RELEASES_API =
-  "https://api.github.com/repos/LeonardoHGB/play-togheter/releases/latest";
+  "https://api.github.com/repos/LeonardoHGB/Spotgino/releases/latest";
 
 function parseVersion(value) {
   const match = String(value).match(/(\d+)\.(\d+)\.(\d+)/);

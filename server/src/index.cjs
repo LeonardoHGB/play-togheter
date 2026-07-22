@@ -5,13 +5,18 @@ const http = require("http");
 const { Server } = require("socket.io");
 const db = require("./db.cjs");
 
-const APP_VERSION = "3.1.0";
+const APP_VERSION = "3.1.1";
 const PORT = Number(process.env.PORT || 3333);
 const HOST = process.env.HOST || "0.0.0.0";
 const SERVER_NAME = process.env.SERVER_NAME || "Spotgino";
 const MAX_ROOMS = Math.max(1, Number(process.env.MAX_ROOMS || 500));
 const MAX_MEMBERS_PER_ROOM = Math.max(2, Number(process.env.MAX_MEMBERS_PER_ROOM || 30));
 const ROOM_IDLE_TTL_MS = Math.max(60_000, Number(process.env.ROOM_IDLE_TTL_MS || 21_600_000));
+// Limites de memória e rate limiting (SG-02).
+const MAX_MESSAGES = 200;
+const MAX_QUEUE = 200;
+const RATE_WINDOW_MS = 10_000;
+const RATE_MAX_EVENTS = 150;
 
 const configuredOrigins = String(process.env.ALLOWED_ORIGINS || "*")
   .split(",")
@@ -106,6 +111,24 @@ function removeSocketFromListeners(socketId) {
   }
 }
 
+// Encerra qualquer "ouvir junto" ativo entre dois usuários (nas duas direções).
+// Usado ao desfazer amizade para não deixar uma inscrição sobreviver à
+// autorização que a permitiu (SG-08).
+function stopFollowingBetween(a, b) {
+  for (const [broadcaster, ex] of [[a, b], [b, a]]) {
+    const set = listeners.get(broadcaster);
+    if (!set) continue;
+    for (const socketId of set) {
+      const s = io.sockets.sockets.get(socketId);
+      if (s && s.data.userId === ex) {
+        set.delete(socketId);
+        s.emit("listen:ended", { userId: broadcaster });
+      }
+    }
+    if (set.size === 0) listeners.delete(broadcaster);
+  }
+}
+
 function friendState(userId) {
   return {
     self: db.getAccount(userId),
@@ -144,6 +167,14 @@ function notifyFriendsPresence(userId, online) {
 }
 
 function authenticate(socket, account) {
+  // Se o socket já estava autenticado com outra identidade, remove a presença
+  // anterior antes de setar a nova (SG-09) — senão a conta antiga fica "online"
+  // para sempre e o presence map cresce sem limite.
+  const previousUserId = socket.data.userId;
+  if (previousUserId && previousUserId !== account.userId) {
+    setPresence(previousUserId, socket.id, false);
+    if (!isOnline(previousUserId)) notifyFriendsPresence(previousUserId, false);
+  }
   socket.data.userId = account.userId;
   const wasOnline = isOnline(account.userId);
   setPresence(account.userId, socket.id, true);
@@ -219,7 +250,8 @@ const demoTracks = [
 ];
 
 function roomCode() {
-  return crypto.randomBytes(3).toString("hex").toUpperCase();
+  // 5 bytes = 40 bits (SG-05): força-bruta de código de sala inviável.
+  return crypto.randomBytes(5).toString("hex").toUpperCase();
 }
 
 function expectedPosition(playback) {
@@ -232,6 +264,22 @@ function expectedPosition(playback) {
   );
 }
 
+// Só aceita URLs https de hosts permitidos (SG-06). Evita que a capa/link de uma
+// faixa aponte para um servidor do atacante (tracking pixel de IP / open-redirect).
+function safeMediaUrl(value, allowedHosts) {
+  if (typeof value !== "string" || !value) return null;
+  try {
+    const parsed = new URL(value.slice(0, 1000));
+    if (parsed.protocol !== "https:") return null;
+    const ok = allowedHosts.some(
+      (host) => parsed.hostname === host || parsed.hostname.endsWith(`.${host}`)
+    );
+    return ok ? parsed.toString() : null;
+  } catch {
+    return null;
+  }
+}
+
 function cleanTrack(track) {
   if (!track || typeof track !== "object") return null;
 
@@ -242,11 +290,8 @@ function cleanTrack(track) {
     artist: String(track.artist || "Spotify").slice(0, 240),
     album: String(track.album || "").slice(0, 240),
     durationMs: Math.max(0, Number(track.durationMs) || 0),
-    cover: typeof track.cover === "string" ? track.cover.slice(0, 1000) : null,
-    externalUrl:
-      typeof track.externalUrl === "string"
-        ? track.externalUrl.slice(0, 1000)
-        : null,
+    cover: safeMediaUrl(track.cover, ["scdn.co", "spotifycdn.com"]),
+    externalUrl: safeMediaUrl(track.externalUrl, ["open.spotify.com"]),
     type: track.type === "episode" ? "episode" : "track"
   };
 }
@@ -257,7 +302,7 @@ function serializeRoom(room) {
     hostId: room.hostId,
     members: [...room.members.values()],
     playback: room.playback,
-    queue: room.queue,
+    queue: room.queue.slice(0, MAX_QUEUE),
     messages: room.messages.slice(-80)
   };
 }
@@ -320,7 +365,29 @@ app.get("/demo-tracks", (_request, response) => {
   response.json(demoTracks);
 });
 
+function rateLimited(socket) {
+  const now = Date.now();
+  const bucket = socket.data.rate || (socket.data.rate = { start: now, count: 0 });
+  if (now - bucket.start > RATE_WINDOW_MS) {
+    bucket.start = now;
+    bucket.count = 0;
+  }
+  bucket.count += 1;
+  return bucket.count > RATE_MAX_EVENTS;
+}
+
 io.on("connection", (socket) => {
+  // Throttle por socket (SG-02): pacotes acima do limite são descartados com
+  // erro (o socket NÃO é desconectado). O uso normal — polls de sync do host,
+  // drift dos convidados, chat — fica bem abaixo de RATE_MAX_EVENTS por janela.
+  socket.use((packet, next) => {
+    if (rateLimited(socket)) {
+      next(new Error("Você está enviando eventos rápido demais."));
+      return;
+    }
+    next();
+  });
+
   socket.on("room:create", ({ displayName }, callback) => {
     if (!requireAuth(socket, callback)) return;
     if (rooms.size >= MAX_ROOMS) {
@@ -398,6 +465,28 @@ io.on("connection", (socket) => {
       joinedAt: Date.now()
     });
 
+    // Sai da sala anterior antes de entrar na nova (SG-09) — evita membros-fantasma
+    // e recebimento simultâneo do estado de várias salas (o socket só rastreia a
+    // última roomCode, então o disconnect só limparia uma).
+    const prevCode = socket.data.roomCode;
+    if (prevCode && prevCode !== normalizedCode) {
+      const prev = rooms.get(prevCode);
+      if (prev) {
+        prev.members.delete(socket.id);
+        socket.leave(prevCode);
+        if (prev.members.size === 0) {
+          rooms.delete(prevCode);
+        } else {
+          if (prev.hostId === socket.id) {
+            const [newHostId, newHost] = prev.members.entries().next().value;
+            prev.hostId = newHostId;
+            prev.members.set(newHostId, { ...newHost, isHost: true });
+          }
+          emitRoom(prev);
+        }
+      }
+    }
+
     socket.join(normalizedCode);
     socket.data.roomCode = normalizedCode;
     emitRoom(room);
@@ -473,10 +562,16 @@ io.on("connection", (socket) => {
 
   socket.on("queue:add", ({ track }, callback) => {
     const room = rooms.get(socket.data.roomCode);
+    const member = room?.members.get(socket.id);
     const cleaned = cleanTrack(track);
 
-    if (!room || !cleaned) {
+    if (!room || !member || !cleaned) {
       callback?.({ ok: false, message: "Faixa inválida." });
+      return;
+    }
+
+    if (room.queue.length >= MAX_QUEUE) {
+      callback?.({ ok: false, message: "A fila está cheia." });
       return;
     }
 
@@ -529,30 +624,19 @@ io.on("connection", (socket) => {
       message: cleanMessage,
       createdAt: Date.now()
     });
+    if (room.messages.length > MAX_MESSAGES) {
+      room.messages.splice(0, room.messages.length - MAX_MESSAGES);
+    }
 
     emitRoom(room);
   });
 
   // --- Conta ------------------------------------------------------------
 
-  socket.on("account:register", ({ displayName } = {}, callback) => {
-    try {
-      const account = db.createAccount(displayName);
-      authenticate(socket, account);
-      callback?.({
-        ok: true,
-        account: {
-          userId: account.userId,
-          token: account.token,
-          displayName: account.displayName
-        },
-        state: friendState(account.userId)
-      });
-    } catch (error) {
-      console.error("Falha ao registrar conta:", error);
-      callback?.({ ok: false, message: "Não foi possível criar a conta." });
-    }
-  });
+  // account:register removido (SG-03): criava conta anônima autenticada sem
+  // verificação de identidade (Sybil / exaustão de disco no SQLite). O cliente
+  // sempre entra via Spotify (account:spotify) ou por credenciais salvas
+  // (account:login), então o handler não tinha uso legítimo.
 
   socket.on("account:spotify", async ({ token } = {}, callback) => {
     try {
@@ -674,6 +758,7 @@ io.on("connection", (socket) => {
 
     const other = String(friendId || "").trim().toUpperCase();
     db.removeFriendship(userId, other);
+    stopFollowingBetween(userId, other);
     callback?.({ ok: true });
     pushFriendState(userId);
     if (isOnline(other)) pushFriendState(other);
@@ -696,8 +781,16 @@ io.on("connection", (socket) => {
       .trim()
       .toUpperCase();
 
-    if (!roomCodeValue || !rooms.has(roomCodeValue)) {
+    if (!roomCodeValue) {
       callback?.({ ok: false, message: "Você precisa estar em uma sala válida." });
+      return;
+    }
+    // Exige que o remetente seja membro da sala que está convidando (SG-05) —
+    // sem isso dava para forjar convite para qualquer sala existente / usar como
+    // oráculo de existência de sala.
+    const inviteRoom = rooms.get(roomCodeValue);
+    if (!inviteRoom || !inviteRoom.members.get(socket.id)) {
+      callback?.({ ok: false, message: "Você precisa estar na sala para convidar." });
       return;
     }
     if (!db.areFriends(userId, target)) {

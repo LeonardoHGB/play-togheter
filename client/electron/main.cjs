@@ -12,6 +12,29 @@ const DEFAULT_SERVER_URL =
 const NORMAL_MIN_WIDTH = 980;
 const NORMAL_MIN_HEIGHT = 680;
 
+// Hosts que o app pode abrir no navegador externo (SG-06): login do Spotify
+// (accounts.spotify.com), link de faixa (open.spotify.com) e releases no GitHub.
+const EXTERNAL_HOST_ALLOWLIST = ["github.com", "spotify.com"];
+function isAllowedExternalUrl(url) {
+  if (typeof url !== "string") return false;
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol !== "https:") return false;
+    return EXTERNAL_HOST_ALLOWLIST.some(
+      (host) => parsed.hostname === host || parsed.hostname.endsWith(`.${host}`)
+    );
+  } catch {
+    return false;
+  }
+}
+
+// Escapa valores interpolados no HTML da página de callback OAuth (SG-07).
+function escapeHtml(value) {
+  return String(value).replace(/[&<>"']/g, (c) =>
+    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])
+  );
+}
+
 // Define o nome do app (e portanto a pasta de userData: %APPDATA%\Spotgino no
 // Windows, ~/.config/Spotgino no Linux). Sem isso o Electron usaria o campo
 // "name" do package.json ("spotgino-client").
@@ -183,8 +206,8 @@ function callbackHtml({ success, title, message }) {
 <body>
   <main>
     <div class="icon">${success ? "✓" : "!"}</div>
-    <h1>${title}</h1>
-    <p>${message}</p>
+    <h1>${escapeHtml(title)}</h1>
+    <p>${escapeHtml(message)}</p>
     <p style="margin-top:14px">Você já pode voltar ao aplicativo.</p>
   </main>
   <script>setTimeout(() => window.close(), 1800);</script>
@@ -205,6 +228,20 @@ function startSpotifyCallbackServer() {
 
   spotifyCallbackServer = http.createServer((request, response) => {
     try {
+      // Rejeita requisições cujo Host não seja o loopback esperado (SG-07):
+      // impede DNS-rebinding a partir de uma página web maliciosa.
+      const host = request.headers.host;
+      const allowedHosts = [
+        `${CALLBACK_HOST}:${CALLBACK_PORT}`,
+        `127.0.0.1:${CALLBACK_PORT}`,
+        `localhost:${CALLBACK_PORT}`
+      ];
+      if (!allowedHosts.includes(host)) {
+        response.writeHead(400, { "Content-Type": "text/plain; charset=utf-8" });
+        response.end("Host inválido.");
+        return;
+      }
+
       const requestUrl = new URL(request.url, `http://${CALLBACK_HOST}:${CALLBACK_PORT}`);
 
       if (requestUrl.pathname !== "/callback") {
@@ -287,8 +324,23 @@ function createWindow() {
   }
 
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
-    if (url.startsWith("https://")) shell.openExternal(url);
+    if (isAllowedExternalUrl(url)) shell.openExternal(url);
     return { action: "deny" };
+  });
+
+  // Bloqueia navegação do renderer para outra origem (SG-11); se for um host
+  // permitido, abre no navegador externo em vez de navegar dentro do app.
+  mainWindow.webContents.on("will-navigate", (event, url) => {
+    let sameOrigin = false;
+    try {
+      sameOrigin = new URL(url).origin === new URL(mainWindow.webContents.getURL()).origin;
+    } catch {
+      sameOrigin = false;
+    }
+    if (!sameOrigin) {
+      event.preventDefault();
+      if (isAllowedExternalUrl(url)) shell.openExternal(url);
+    }
   });
 
   // Reload do renderer (Ctrl+R/crash) zera o estado do React: se a janela
@@ -305,8 +357,8 @@ function createWindow() {
 }
 
 ipcMain.handle("open-external", async (_event, url) => {
-  if (typeof url !== "string" || !url.startsWith("https://")) {
-    throw new Error("URL externa inválida.");
+  if (!isAllowedExternalUrl(url)) {
+    throw new Error("URL externa não permitida.");
   }
   await shell.openExternal(url);
   return true;
