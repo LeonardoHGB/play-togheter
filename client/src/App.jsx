@@ -493,6 +493,13 @@ export default function App() {
     return () => clearTimeout(timer);
   }, []);
 
+  // A barra verde de aviso some sozinha após 5s (reinicia a cada novo aviso).
+  useEffect(() => {
+    if (!notice) return undefined;
+    const timer = setTimeout(() => setNotice(""), 5000);
+    return () => clearTimeout(timer);
+  }, [notice]);
+
   useEffect(() => {
     if (!runtimeReady || !serverUrl) return undefined;
 
@@ -1822,9 +1829,18 @@ export default function App() {
 
               {room.messages.map((message) => (
                 <div className="message" key={message.id}>
-                  <div className="avatar small">
-                    {message.author.slice(0, 1).toUpperCase()}
-                  </div>
+                  {message.avatar ? (
+                    <img
+                      className="avatar small"
+                      src={message.avatar}
+                      alt={message.author}
+                      referrerPolicy="no-referrer"
+                    />
+                  ) : (
+                    <div className="avatar small">
+                      {message.author.slice(0, 1).toUpperCase()}
+                    </div>
+                  )}
                   <div>
                     <strong>{message.author}</strong>
                     <p>{message.message}</p>

@@ -504,6 +504,7 @@ io.on("connection", (socket) => {
       id: crypto.randomUUID(),
       memberId: socket.id,
       author: member.name,
+      avatar: member.avatar || null,
       message: cleanMessage,
       createdAt: Date.now()
     });
