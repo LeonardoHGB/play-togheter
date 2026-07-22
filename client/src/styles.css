@@ -331,36 +331,114 @@ img.avatar { object-fit: cover; flex: 0 0 auto; }
 }
 .friend-actions { flex-wrap: wrap; justify-content: flex-end; }
 
-/* Banner de "ouvir junto" no lobby. */
-.listen-banner {
-  position: fixed;
-  left: 50%;
-  bottom: 24px;
-  transform: translateX(-50%);
-  width: min(520px, calc(100% - 32px));
+/* Dashboard de amigos no lobby. */
+.friends-dashboard { margin-top: 22px; }
+.friends-dashboard-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 16px;
-  padding: 14px 18px;
-  border: 1px solid rgba(29, 185, 84, 0.5);
-  border-radius: 16px;
-  background: rgba(20, 24, 22, 0.96);
-  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.5);
-  z-index: 50;
-  animation: listen-banner-in 0.3s ease;
+  margin-bottom: 10px;
 }
-@keyframes listen-banner-in {
-  from { opacity: 0; transform: translate(-50%, 12px); }
-  to { opacity: 1; transform: translate(-50%, 0); }
+.friends-dashboard-head > span { font-size: 13px; font-weight: 800; letter-spacing: 0.02em; }
+.dashboard-manage { display: inline-flex; align-items: center; gap: 8px; font-size: 12px; }
+.friends-dashboard-empty { color: #71717a; font-size: 13px; line-height: 1.5; }
+.friends-dashboard-list { display: grid; gap: 8px; max-height: 320px; overflow-y: auto; }
+.friend-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid #27272a;
+  border-radius: 14px;
+  background: #18181b;
+  text-align: left;
+  cursor: default;
+  transition: border-color 0.2s ease, background 0.2s ease, transform 0.1s ease;
 }
-.listen-banner-info { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
-.listen-banner-info span { color: #1DB954; font-size: 12px; font-weight: 700; }
-.listen-banner-info strong {
-  font-size: 13px;
+.friend-card.playing { cursor: pointer; }
+.friend-card.playing:hover {
+  border-color: rgba(29, 185, 84, 0.55);
+  background: #1c221d;
+  transform: translateY(-1px);
+}
+.friend-card.active {
+  border-color: #1DB954;
+  background: rgba(29, 185, 84, 0.12);
+}
+.friend-card:disabled { opacity: 0.72; }
+.friend-card-info { flex: 1; min-width: 0; }
+.friend-card-info strong { display: block; font-size: 14px; }
+.friend-card-info span {
+  display: block;
+  font-size: 12px;
+  color: #71717a;
+  margin-top: 2px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.friend-card-action {
+  flex: 0 0 auto;
+  font-size: 11px;
+  font-weight: 800;
+  color: #052e16;
+  background: #1DB954;
+  padding: 6px 12px;
+  border-radius: 999px;
+}
+.friend-card.active .friend-card-action { color: #fafafa; background: #ef4444; }
+
+/* Player fixo na parte de baixo ao "ouvir junto". */
+.bottom-player {
+  position: fixed;
+  left: 50%;
+  bottom: 20px;
+  transform: translateX(-50%);
+  width: min(560px, calc(100% - 32px));
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 12px 16px;
+  border: 1px solid rgba(29, 185, 84, 0.5);
+  border-radius: 18px;
+  background: rgba(20, 24, 22, 0.97);
+  box-shadow: 0 18px 55px rgba(0, 0, 0, 0.55);
+  z-index: 50;
+  animation: bottom-player-in 0.3s ease;
+}
+@keyframes bottom-player-in {
+  from { opacity: 0; transform: translate(-50%, 14px); }
+  to { opacity: 1; transform: translate(-50%, 0); }
+}
+.bottom-player-cover {
+  width: 48px;
+  height: 48px;
+  border-radius: 10px;
+  object-fit: cover;
+  flex: 0 0 auto;
+}
+.bottom-player-cover.placeholder {
+  display: grid;
+  place-items: center;
+  background: #27272a;
+  color: #86efac;
+  font-size: 20px;
+}
+.bottom-player-info { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.bottom-player-eyebrow { color: #1DB954; font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.04em; }
+.bottom-player-info strong { font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bottom-player-info small { font-size: 12px; color: #a1a1aa; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bottom-player-stop {
+  flex: 0 0 auto;
+  border: 0;
+  border-radius: 999px;
+  padding: 9px 16px;
+  font-size: 12px;
+  font-weight: 800;
+  color: #fafafa;
+  background: #ef4444;
+  cursor: pointer;
 }
 
 .now-playing {
