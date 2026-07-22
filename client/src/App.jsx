@@ -292,6 +292,12 @@ export default function App() {
     listeningToRef.current = listeningTo?.userId || null;
   }, [listeningTo]);
 
+  // Ordena o dashboard: quem está ouvindo algo primeiro, depois online, depois offline.
+  const sortedFriends = [...friendsHub.friends].sort((a, b) => {
+    const rank = (f) => (f.online && f.nowPlaying ? 0 : f.online ? 1 : 2);
+    return rank(a) - rank(b) || a.displayName.localeCompare(b.displayName);
+  });
+
   // Redimensiona a janela do Electron conforme o modo mini/chat (Win e Linux).
   // Dep booleana: `room` muda de identidade a cada room:state e re-invocaria
   // o IPC de resize a cada mensagem de chat/poll do host.
@@ -1468,12 +1474,86 @@ export default function App() {
                 </button>
               </div>
 
-              <button className="friends-button" onClick={() => setFriendsOpen(true)}>
-                <span>Amigos</span>
-                {friendsHub.incoming.length > 0 && (
-                  <span className="friends-badge">{friendsHub.incoming.length}</span>
+              <section className="friends-dashboard">
+                <div className="friends-dashboard-head">
+                  <span>Amigos</span>
+                  <button
+                    className="ghost-button dashboard-manage"
+                    onClick={() => setFriendsOpen(true)}
+                  >
+                    Gerenciar
+                    {friendsHub.incoming.length > 0 && (
+                      <span className="friends-badge">{friendsHub.incoming.length}</span>
+                    )}
+                  </button>
+                </div>
+
+                {sortedFriends.length === 0 ? (
+                  <p className="friends-dashboard-empty">
+                    Você ainda não tem amigos. Toque em Gerenciar para adicionar pelo código.
+                  </p>
+                ) : (
+                  <div className="friends-dashboard-list">
+                    {sortedFriends.map((friend) => {
+                      const canListen = Boolean(friend.online && friend.nowPlaying);
+                      const active = listeningTo?.userId === friend.userId;
+                      return (
+                        <button
+                          key={friend.userId}
+                          className={`friend-card${canListen ? " playing" : ""}${active ? " active" : ""}`}
+                          onClick={() =>
+                            canListen &&
+                            (active
+                              ? stopListening()
+                              : listenAlong(friend.userId, friend.displayName))
+                          }
+                          disabled={!canListen}
+                          title={
+                            canListen
+                              ? active
+                                ? "Parar de ouvir junto"
+                                : "Ouvir junto"
+                              : friend.online
+                                ? "Online"
+                                : "Offline"
+                          }
+                        >
+                          <div className="avatar-wrap">
+                            {friend.avatarUrl ? (
+                              <img
+                                className="avatar"
+                                src={friend.avatarUrl}
+                                alt=""
+                                referrerPolicy="no-referrer"
+                              />
+                            ) : (
+                              <div className="avatar">
+                                {friend.displayName.slice(0, 1).toUpperCase()}
+                              </div>
+                            )}
+                            <span className={`presence-dot ${friend.online ? "online" : ""}`} />
+                          </div>
+                          <div className="friend-card-info">
+                            <strong>{friend.displayName}</strong>
+                            {canListen ? (
+                              <span className="friend-now-playing">
+                                ♪ {friend.nowPlaying.title}
+                              </span>
+                            ) : (
+                              <span>{friend.online ? "Online" : "Offline"}</span>
+                            )}
+                          </div>
+                          {canListen && (
+                            <span className="friend-card-action">
+                              {active ? "Parar" : "Ouvir junto"}
+                            </span>
+                          )}
+                        </button>
+                      );
+                    })}
+                  </div>
                 )}
-              </button>
+              </section>
             </>
           )}
 
@@ -1527,16 +1607,25 @@ export default function App() {
         notify={setNotice}
       />
       {listeningTo && (
-        <div className="listen-banner">
-          <div className="listen-banner-info">
-            <span>♪ Ouvindo junto com {listeningTo.name}</span>
-            {listeningTrack && (
-              <strong>
-                {listeningTrack.title} · {listeningTrack.artist}
-              </strong>
-            )}
+        <div className="bottom-player">
+          {listeningTrack?.cover ? (
+            <img
+              className="bottom-player-cover"
+              src={listeningTrack.cover}
+              alt=""
+              referrerPolicy="no-referrer"
+            />
+          ) : (
+            <div className="bottom-player-cover placeholder">♫</div>
+          )}
+          <div className="bottom-player-info">
+            <span className="bottom-player-eyebrow">
+              Ouvindo junto com {listeningTo.name}
+            </span>
+            <strong>{listeningTrack?.title || "Sincronizando..."}</strong>
+            {listeningTrack?.artist && <small>{listeningTrack.artist}</small>}
           </div>
-          <button className="mini-button danger" onClick={stopListening}>
+          <button className="bottom-player-stop" onClick={stopListening}>
             Parar
           </button>
         </div>
