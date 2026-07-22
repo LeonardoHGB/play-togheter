@@ -19,6 +19,65 @@ import { useFriends, FriendsPanel, InviteToasts } from "./friends";
 import MiniPlayer, { MINI_SIZE, MINI_CHAT_SIZE } from "./miniplayer";
 import logo from "./assets/logo.png";
 
+// Arte circular com glow verde e o logo ao centro (hero da tela inicial).
+function HeroVisual() {
+  return (
+    <div className="hero-visual" aria-hidden="true">
+      <div className="hero-rings" />
+      <div className="hero-glow" />
+      <img className="hero-logo" src={logo} alt="" draggable={false} />
+    </div>
+  );
+}
+
+// Ícones SVG inline (stroke = currentColor, herdam a cor do contexto).
+const IconGrid = () => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <rect x="3" y="3" width="7" height="7" rx="1.5" />
+    <rect x="14" y="3" width="7" height="7" rx="1.5" />
+    <rect x="3" y="14" width="7" height="7" rx="1.5" />
+    <rect x="14" y="14" width="7" height="7" rx="1.5" />
+  </svg>
+);
+const IconUsers = () => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M17 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
+    <circle cx="9.5" cy="7" r="4" />
+    <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
+    <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+  </svg>
+);
+const IconGear = () => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <circle cx="12" cy="12" r="3" />
+    <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+  </svg>
+);
+const IconInfo = () => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <circle cx="12" cy="12" r="10" />
+    <line x1="12" y1="16" x2="12" y2="12" />
+    <line x1="12" y1="8" x2="12.01" y2="8" />
+  </svg>
+);
+const IconRadio = () => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <circle cx="12" cy="12" r="2" />
+    <path d="M16.24 7.76a6 6 0 0 1 0 8.49m-8.48 0a6 6 0 0 1 0-8.49m11.31-2.82a10 10 0 0 1 0 14.14m-14.14 0a10 10 0 0 1 0-14.14" />
+  </svg>
+);
+const IconShield = () => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+  </svg>
+);
+const IconPlus = () => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+    <line x1="12" y1="5" x2="12" y2="19" />
+    <line x1="5" y1="12" x2="19" y2="12" />
+  </svg>
+);
+
 // Logo da marca com easter egg: duplo clique gira o logo. A classe `spin` é
 // removida no fim da animação para poder disparar de novo.
 function BrandLogo({ className = "logo" }) {
@@ -202,6 +261,8 @@ export default function App() {
   const [serverDraft, setServerDraft] = useState("");
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [friendsOpen, setFriendsOpen] = useState(false);
+  const [homeView, setHomeView] = useState("inicio"); // "inicio" | "amigos"
+  const [confirmLeave, setConfirmLeave] = useState(false);
   const [miniMode, setMiniMode] = useState(false);
   const [miniChatOpen, setMiniChatOpen] = useState(false);
   const [unreadMessages, setUnreadMessages] = useState(0);
@@ -358,12 +419,12 @@ export default function App() {
     if (window.electronAPI?.notify) {
       // Processo main (libnotify) — confiável no Linux.
       window.electronAPI.notify({
-        title: `Spotgino — ${last.author}`,
+        title: `Spotgino · ${last.author}`,
         body: last.message
       });
     } else {
       try {
-        new Notification(`Spotgino — ${last.author}`, {
+        new Notification(`Spotgino · ${last.author}`, {
           body: last.message,
           icon: logo
         });
@@ -610,11 +671,17 @@ export default function App() {
       setConnectionError(`Socket.IO: ${error.message}`);
     };
     const onRoomState = (nextRoom) => setRoom(nextRoom);
+    const onRoomClosed = () => {
+      exitMiniMode();
+      setRoom(null);
+      setNotice("O host encerrou a sala.");
+    };
 
     activeSocket.on("connect", onConnect);
     activeSocket.on("disconnect", onDisconnect);
     activeSocket.on("connect_error", onConnectError);
     activeSocket.on("room:state", onRoomState);
+    activeSocket.on("room:closed", onRoomClosed);
 
     if (!activeSocket.connected) activeSocket.connect();
     else onConnect();
@@ -624,6 +691,7 @@ export default function App() {
       activeSocket.off("disconnect", onDisconnect);
       activeSocket.off("connect_error", onConnectError);
       activeSocket.off("room:state", onRoomState);
+      activeSocket.off("room:closed", onRoomClosed);
     };
   }, [runtimeReady, serverUrl]);
 
@@ -1051,6 +1119,17 @@ export default function App() {
     );
   }
 
+  function leaveRoom() {
+    // Avisa o servidor (se for host, ele encerra a sala e avisa todos). Depois
+    // volta ao menu localmente — funciona mesmo que o servidor ainda não tenha
+    // o handler room:leave.
+    getSocket()?.emit("room:leave", {}, () => {});
+    setConfirmLeave(false);
+    exitMiniMode();
+    setRoom(null);
+    setNotice("Você saiu da sala.");
+  }
+
   function listenAlong(userId, name) {
     if (room) {
       setNotice("Saia da sala para ouvir junto com um amigo.");
@@ -1362,6 +1441,9 @@ export default function App() {
     else window.open(url, "_blank", "noopener,noreferrer");
   }
 
+  const [joinOpen, setJoinOpen] = useState(false);
+  const [aboutOpen, setAboutOpen] = useState(false);
+
   if (!runtimeReady || !splashReady) {
     return (
       <main className="splash">
@@ -1371,132 +1453,337 @@ export default function App() {
   }
 
   if (!room) {
+    const accountName =
+      friendsHub.account?.displayName ||
+      spotifyProfile?.display_name ||
+      "Conta Spotify";
+    const accountAvatar =
+      friendsHub.account?.avatarUrl ||
+      spotifyProfile?.images?.[0]?.url ||
+      null;
+    const sortedFriends = [...friendsHub.friends].sort((a, b) => {
+      const rank = (f) => (f.online ? (f.nowPlaying ? 0 : 1) : 2);
+      return rank(a) - rank(b) || a.displayName.localeCompare(b.displayName);
+    });
+    const listeningFriends = friendsHub.friends.filter(
+      (f) => f.online && f.nowPlaying
+    );
+    // "Logado" = tem sessão do Spotify OU já tem conta no servidor. Sem isso, o
+    // gate de login aparecia mesmo com a conta ativa (só a sessão Spotify caindo).
+    const loggedIn = spotifyConnected || Boolean(friendsHub.account);
+
     return (
       <>
-      <main className="landing">
-        <section className="hero-card">
-          <div className="brand">
+      <main className="home-shell">
+        <aside className="nav-sidebar">
+          <div className="nav-brand">
             <BrandLogo />
             <div>
               <strong>Spotgino</strong>
-              <span>Electron + Spotify Connect</span>
+              <span>v{appVersion}</span>
             </div>
           </div>
 
-          <div className="hero-copy">
-            <span className="eyebrow">SINCRONIZAÇÃO EM TEMPO REAL</span>
-            <h1>Uma sala musical para seus amigos.</h1>
-            <p>
-              O host pode controlar pelo aplicativo ou diretamente pelo Spotify.
-              As mudanças aparecem na sala automaticamente.
-            </p>
-          </div>
+          <nav className="nav-list">
+            <button
+              type="button"
+              className={`nav-item ${homeView === "inicio" ? "active" : ""}`}
+              onClick={() => setHomeView("inicio")}
+            >
+              <span className="nav-ico"><IconGrid /></span> Início
+            </button>
+            <button
+              type="button"
+              className={`nav-item ${homeView === "amigos" ? "active" : ""}`}
+              onClick={() => setHomeView("amigos")}
+            >
+              <span className="nav-ico"><IconUsers /></span> Amigos
+              {friendsHub.incoming.length > 0 && (
+                <span className="nav-badge">{friendsHub.incoming.length}</span>
+              )}
+            </button>
+            <button type="button" className="nav-item" onClick={openServerSettings}>
+              <span className="nav-ico"><IconGear /></span> Configurações
+            </button>
+            <button type="button" className="nav-item" onClick={() => setAboutOpen(true)}>
+              <span className="nav-ico"><IconInfo /></span> Sobre
+            </button>
+          </nav>
 
-          <div className="server-connection-card">
-            <div className="connection-line">
+          {friendsHub.account && (
+            <button
+              type="button"
+              className="nav-account"
+              onClick={() => setHomeView("amigos")}
+              title="Ver amigos"
+            >
+              {accountAvatar ? (
+                <img className="avatar" src={accountAvatar} alt="" referrerPolicy="no-referrer" />
+              ) : (
+                <div className="avatar">{accountName.slice(0, 1).toUpperCase()}</div>
+              )}
+              <div className="nav-account-info">
+                <span>Conectado como</span>
+                <strong>{accountName}</strong>
+              </div>
+              <span className="nav-account-chevron">›</span>
+            </button>
+          )}
+        </aside>
+
+        <div className="home-main">
+          <header className="home-topbar">
+            <button className="server-pill" onClick={openServerSettings} title={serverUrl}>
               <span className={`status-dot ${socketConnected ? "online" : ""}`} />
               {socketConnected ? "Servidor conectado" : "Conectando ao servidor..."}
-            </div>
-            <code>{serverUrl}</code>
-            <button className="server-settings-button" onClick={openServerSettings}>
-              Configurar servidor
             </button>
-          </div>
+          </header>
 
-          {!spotifyConnected ? (
-            <div className="login-gate">
-              <p className="login-gate-copy">
-                Entre com sua conta Spotify para criar salas, ver seus amigos e
-                ouvir junto. Seu nome e sua foto vêm da conta.
-              </p>
-              <button
-                className="spotify-login-button"
-                onClick={connectSpotify}
-                disabled={spotifyBusy}
-              >
-                {spotifyBusy ? "Abrindo o Spotify..." : "Entrar com Spotify"}
-              </button>
-              {spotifyError && <div className="error-box">{spotifyError}</div>}
-            </div>
+          {!loggedIn ? (
+            <section className="home-hero login">
+              <div className="hero-text">
+                <span className="eyebrow">SINCRONIZAÇÃO EM TEMPO REAL</span>
+                <h1>Música juntos.<br />Sincronizado.</h1>
+                <p>
+                  Entre com sua conta Spotify para criar salas, ver seus amigos e
+                  ouvir junto em tempo real. Seu nome e sua foto vêm da conta.
+                </p>
+                <div className="hero-actions">
+                  <button
+                    className="btn-primary"
+                    onClick={connectSpotify}
+                    disabled={spotifyBusy}
+                  >
+                    {spotifyBusy ? "Abrindo o Spotify..." : "Entrar com Spotify"}
+                  </button>
+                </div>
+                {spotifyError && <div className="error-box">{spotifyError}</div>}
+              </div>
+              <HeroVisual />
+            </section>
+          ) : homeView === "amigos" ? (
+            <FriendsPanel
+              inline
+              account={friendsHub.account}
+              friends={friendsHub.friends}
+              incoming={friendsHub.incoming}
+              outgoing={friendsHub.outgoing}
+              onAdd={friendsHub.addFriend}
+              onAccept={friendsHub.acceptFriend}
+              onDecline={friendsHub.declineFriend}
+              onRemove={friendsHub.removeFriend}
+              onInvite={friendsHub.inviteFriend}
+              onListenAlong={listenAlong}
+              onStopListening={stopListening}
+              listeningTo={listeningTo?.userId}
+              inRoom={false}
+              roomCode={undefined}
+              notify={setNotice}
+            />
           ) : (
             <>
-              <div className="account-welcome">
-                {(friendsHub.account?.avatarUrl ||
-                  spotifyProfile?.images?.[0]?.url) && (
-                  <img
-                    className="avatar"
-                    src={
-                      friendsHub.account?.avatarUrl ||
-                      spotifyProfile?.images?.[0]?.url
-                    }
-                    alt=""
-                    referrerPolicy="no-referrer"
-                  />
-                )}
-                <div>
-                  <span className="account-welcome-eyebrow">Conectado como</span>
-                  <strong>
-                    {friendsHub.account?.displayName ||
-                      spotifyProfile?.display_name ||
-                      "Conta Spotify"}
-                  </strong>
+              <div className="home-grid">
+                <section className="home-hero">
+                  <div className="hero-text">
+                    <span className="eyebrow">SINCRONIZAÇÃO EM TEMPO REAL</span>
+                    <h1>Música juntos.<br />Sincronizado.</h1>
+                    <p>
+                      Crie salas musicais e sincronize o que você está ouvindo
+                      com seus amigos em tempo real.
+                    </p>
+                    <div className="hero-actions">
+                      <button
+                        className="btn-primary"
+                        onClick={createRoom}
+                        disabled={!socketConnected || !friendsHub.account}
+                      >
+                        <IconPlus /> Criar nova sala
+                      </button>
+                      <button
+                        className="btn-ghost"
+                        onClick={() => setJoinOpen((v) => !v)}
+                      >
+                        Entrar com código
+                      </button>
+                      {!spotifyConnected && (
+                        <button
+                          className="btn-ghost"
+                          onClick={connectSpotify}
+                          disabled={spotifyBusy}
+                        >
+                          {spotifyBusy ? "Abrindo..." : "Conectar Spotify"}
+                        </button>
+                      )}
+                    </div>
+
+                    {joinOpen && (
+                      <form
+                        className="code-join"
+                        onSubmit={(event) => {
+                          event.preventDefault();
+                          joinRoom();
+                        }}
+                      >
+                        <input
+                          value={roomCode}
+                          onChange={(event) => setRoomCode(event.target.value.toUpperCase())}
+                          placeholder="CÓDIGO DA SALA"
+                          maxLength={12}
+                          autoFocus
+                        />
+                        <button
+                          className="btn-primary sm"
+                          type="submit"
+                          disabled={!socketConnected || !roomCode.trim()}
+                        >
+                          Entrar
+                        </button>
+                      </form>
+                    )}
+
+                    <div className="hero-chips">
+                      <div className="hero-chip">
+                        <span className="chip-ico"><IconRadio /></span>
+                        <div>
+                          <strong>Tempo real</strong>
+                          <small>Sincronização instantânea da reprodução.</small>
+                        </div>
+                      </div>
+                      <div className="hero-chip">
+                        <span className="chip-ico"><IconUsers /></span>
+                        <div>
+                          <strong>Com amigos</strong>
+                          <small>Convide e curta com quem você gosta.</small>
+                        </div>
+                      </div>
+                      <div className="hero-chip">
+                        <span className="chip-ico"><IconShield /></span>
+                        <div>
+                          <strong>Seguro</strong>
+                          <small>Suas salas são privadas e protegidas.</small>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                  <HeroVisual />
+                </section>
+
+                <aside className="activity-rail">
+                  <div className="rail-head">
+                    <span>Amigos</span>
+                    <button className="rail-manage" onClick={() => setHomeView("amigos")}>
+                      Gerenciar ›
+                    </button>
+                  </div>
+
+                  {sortedFriends.length === 0 ? (
+                    <div className="rail-empty">
+                      <p>Você ainda não adicionou amigos.</p>
+                      <button className="btn-ghost sm" onClick={() => setHomeView("amigos")}>
+                        Adicionar amigos
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="rail-list">
+                      {sortedFriends.map((friend) => (
+                        <div className="rail-friend" key={friend.userId}>
+                          <div className="avatar-wrap">
+                            {friend.avatarUrl ? (
+                              <img className="avatar small" src={friend.avatarUrl} alt="" referrerPolicy="no-referrer" />
+                            ) : (
+                              <div className="avatar small">{friend.displayName.slice(0, 1).toUpperCase()}</div>
+                            )}
+                            <span className={`presence-dot ${friend.online ? "online" : ""}`} />
+                          </div>
+                          <div className="rail-friend-info">
+                            <strong>{friend.displayName}</strong>
+                            <span className={friend.nowPlaying ? "playing" : ""}>
+                              {friend.nowPlaying
+                                ? `♪ ${friend.nowPlaying.title}${friend.nowPlaying.artist ? " · " + friend.nowPlaying.artist : ""}`
+                                : friend.online
+                                  ? "Online"
+                                  : "Offline"}
+                            </span>
+                          </div>
+                          {friend.online && friend.nowPlaying && (
+                            <button
+                              className="rail-join"
+                              onClick={() => listenAlong(friend.userId, friend.displayName)}
+                              disabled={listeningTo?.userId === friend.userId}
+                            >
+                              {listeningTo?.userId === friend.userId ? "Ouvindo" : "Ouvir junto"}
+                            </button>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </aside>
+              </div>
+
+              <section className="listen-strip">
+                <div className="strip-head">
+                  <span>Ouvir junto</span>
                 </div>
-              </div>
-
-              <button
-                className="primary-button"
-                onClick={createRoom}
-                disabled={!socketConnected || !friendsHub.account}
-              >
-                {friendsHub.account ? "Criar nova sala" : "Entrando na sua conta..."}
-              </button>
-
-              <div className="divider"><span>ou entrar com código</span></div>
-
-              <div className="join-row">
-                <input
-                  value={roomCode}
-                  onChange={(event) => setRoomCode(event.target.value.toUpperCase())}
-                  placeholder="EX: A1B2C3"
-                  maxLength={6}
-                />
-                <button
-                  className="secondary-button"
-                  onClick={joinRoom}
-                  disabled={!socketConnected || !friendsHub.account}
-                >
-                  Entrar
-                </button>
-              </div>
-
-              <button className="friends-button" onClick={() => setFriendsOpen(true)}>
-                <span>Amigos</span>
-                {friendsHub.incoming.length > 0 && (
-                  <span className="friends-badge">{friendsHub.incoming.length}</span>
+                {listeningFriends.length === 0 ? (
+                  <div className="strip-empty">
+                    Nenhum amigo ouvindo agora. Quando alguém estiver tocando,
+                    aparece aqui para você entrar junto com um clique.
+                  </div>
+                ) : (
+                  <div className="strip-cards">
+                    {listeningFriends.map((friend) => (
+                      <button
+                        className="strip-card"
+                        key={friend.userId}
+                        onClick={() => listenAlong(friend.userId, friend.displayName)}
+                      >
+                        <div className="avatar-wrap">
+                          {friend.avatarUrl ? (
+                            <img className="avatar small" src={friend.avatarUrl} alt="" referrerPolicy="no-referrer" />
+                          ) : (
+                            <div className="avatar small">{friend.displayName.slice(0, 1).toUpperCase()}</div>
+                          )}
+                          <span className="presence-dot online" />
+                        </div>
+                        <div className="strip-card-info">
+                          <strong>{friend.displayName}</strong>
+                          <small>{friend.nowPlaying?.title}</small>
+                          <small className="strip-card-artist">{friend.nowPlaying?.artist}</small>
+                        </div>
+                        <span className="strip-live">● Ao vivo</span>
+                      </button>
+                    ))}
+                  </div>
                 )}
-              </button>
+              </section>
             </>
           )}
 
-          <button
-            className="update-check-link"
-            onClick={() =>
-              updateStatus && updateStatus !== "checking"
-                ? openExternalUrl(updateStatus.url)
-                : checkForUpdates()
-            }
-            disabled={updateStatus === "checking"}
-          >
-            {updateStatus === "checking"
-              ? "Verificando atualizações..."
-              : updateStatus
-                ? `⬆ Versão ${updateStatus.version} disponível — baixar`
-                : `⟳ Verificar atualizações · v${appVersion}`}
-          </button>
+          {(notice || connectionError) && (
+            <div className={connectionError ? "error-box page-message" : "notice page-message"}>
+              {connectionError || notice}
+            </div>
+          )}
 
-          {notice && <div className="notice">{notice}</div>}
-          {connectionError && <div className="error-box">{connectionError}</div>}
-        </section>
+          <footer className="home-footer">
+            <button
+              className="footer-update"
+              onClick={() =>
+                updateStatus && updateStatus !== "checking"
+                  ? openExternalUrl(updateStatus.url)
+                  : checkForUpdates()
+              }
+              disabled={updateStatus === "checking"}
+            >
+              {updateStatus === "checking"
+                ? "Verificando atualizações..."
+                : updateStatus
+                  ? `⬆ Versão ${updateStatus.version} disponível`
+                  : "⟳ Verificar atualizações"}
+            </button>
+          </footer>
+        </div>
       </main>
       <ServerSettingsModal
         open={settingsOpen}
@@ -1556,6 +1843,37 @@ export default function App() {
         onAccept={friendsHub.acceptInvite}
         onDismiss={friendsHub.dismissInvite}
       />
+      {aboutOpen && (
+        <div className="modal-backdrop" onClick={() => setAboutOpen(false)}>
+          <div
+            className="settings-modal about-modal"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="settings-modal-header">
+              <div className="about-brand">
+                <img className="about-logo" src={logo} alt="" />
+                <div>
+                  <h2>Spotgino</h2>
+                  <span>versão {appVersion}</span>
+                </div>
+              </div>
+              <button className="modal-close" onClick={() => setAboutOpen(false)}>
+                ×
+              </button>
+            </div>
+            <p className="settings-description">
+              Salas de música sincronizadas com o Spotify. O host toca e seus
+              amigos ouvem junto, cada um na própria conta, em tempo real.
+            </p>
+            <button
+              className="btn-ghost"
+              onClick={() => openExternalUrl("https://github.com/LeonardoHGB/Spotgino")}
+            >
+              Ver no GitHub
+            </button>
+          </div>
+        </div>
+      )}
       </>
     );
   }
@@ -1703,6 +2021,31 @@ export default function App() {
 
           {spotifyError && <small className="error">{spotifyError}</small>}
         </section>
+
+        {friendsHub.account && (
+          <div className="nav-account inroom">
+            {(friendsHub.account?.avatarUrl || spotifyProfile?.images?.[0]?.url) ? (
+              <img
+                className="avatar"
+                src={friendsHub.account?.avatarUrl || spotifyProfile?.images?.[0]?.url}
+                alt=""
+                referrerPolicy="no-referrer"
+              />
+            ) : (
+              <div className="avatar">
+                {(friendsHub.account?.displayName || "?").slice(0, 1).toUpperCase()}
+              </div>
+            )}
+            <div className="nav-account-info">
+              <span>Conectado como</span>
+              <strong>
+                {friendsHub.account?.displayName ||
+                  spotifyProfile?.display_name ||
+                  "Você"}
+              </strong>
+            </div>
+          </div>
+        )}
       </aside>
 
       <section className="main-content">
@@ -1715,6 +2058,17 @@ export default function App() {
           </div>
 
           <div className="topbar-actions">
+            <span className="server-pill" title={serverUrl}>
+              <span className={`status-dot ${socketConnected ? "online" : ""}`} />
+              {socketConnected ? "Conectado" : "Reconectando..."}
+            </span>
+            <button
+              className="leave-room-button"
+              onClick={() => setConfirmLeave(true)}
+              title="Voltar ao menu inicial"
+            >
+              ⤶ Sair da sala
+            </button>
             {updateStatus && updateStatus !== "checking" && (
               <button
                 className="update-pill"
@@ -2012,6 +2366,29 @@ export default function App() {
       onAccept={friendsHub.acceptInvite}
       onDismiss={friendsHub.dismissInvite}
     />
+    {confirmLeave && (
+      <div className="modal-backdrop" onMouseDown={() => setConfirmLeave(false)}>
+        <div
+          className="settings-modal confirm-modal"
+          onMouseDown={(event) => event.stopPropagation()}
+        >
+          <h2>Sair da sala?</h2>
+          <p className="settings-description">
+            {isHost
+              ? "Você é o host. Ao sair, a sala será encerrada e todos os participantes serão avisados de que você saiu."
+              : "Você vai voltar ao menu inicial e sair desta sala."}
+          </p>
+          <div className="settings-modal-actions">
+            <button className="secondary-button" onClick={() => setConfirmLeave(false)}>
+              Cancelar
+            </button>
+            <button className="confirm-leave-button" onClick={leaveRoom}>
+              {isHost ? "Encerrar sala" : "Sair"}
+            </button>
+          </div>
+        </div>
+      </div>
+    )}
     </>
   );
 }

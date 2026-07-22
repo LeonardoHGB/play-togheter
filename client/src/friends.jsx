@@ -251,6 +251,7 @@ function Avatar({ name, url }) {
 
 export function FriendsPanel({
   open,
+  inline,
   onClose,
   account,
   friends,
@@ -271,7 +272,13 @@ export function FriendsPanel({
   const [code, setCode] = useState("");
   const [sending, setSending] = useState(false);
 
-  if (!open) return null;
+  if (!inline && !open) return null;
+
+  // Online (tocando primeiro) → online → offline; empate por nome.
+  const sortedFriends = [...friends].sort((a, b) => {
+    const rank = (f) => (f.online ? (f.nowPlaying ? 0 : 1) : 2);
+    return rank(a) - rank(b) || a.displayName.localeCompare(b.displayName);
+  });
 
   async function submitAdd() {
     if (!code.trim() || sending) return;
@@ -287,12 +294,14 @@ export function FriendsPanel({
     notify?.("Seu código foi copiado.");
   }
 
-  return (
-    <div className="modal-backdrop" onMouseDown={onClose}>
-      <section
-        className="settings-modal friends-modal"
-        onMouseDown={(event) => event.stopPropagation()}
-      >
+  const body = (
+    <>
+      {inline ? (
+        <div className="friends-inline-head">
+          <h2>Amigos</h2>
+          <p>Adicione por código, gerencie pedidos e ouça junto com quem está online.</p>
+        </div>
+      ) : (
         <div className="modal-head">
           <div>
             <h2>Amigos</h2>
@@ -302,11 +311,12 @@ export function FriendsPanel({
             ×
           </button>
         </div>
+      )}
 
         <div className="friend-code-card">
           <div>
             <span>Seu código de amigo</span>
-            <strong>{account?.userId || "—"}</strong>
+            <strong>{account?.userId || "..."}</strong>
           </div>
           <button className="secondary-button" onClick={copyCode} disabled={!account?.userId}>
             Copiar
@@ -362,7 +372,7 @@ export function FriendsPanel({
           {friends.length === 0 ? (
             <p className="friend-empty">Nenhum amigo ainda. Compartilhe seu código acima.</p>
           ) : (
-            friends.map((person) => (
+            sortedFriends.map((person) => (
               <div className="friend-row" key={person.userId}>
                 <div className="avatar-wrap">
                   <Avatar name={person.displayName} url={person.avatarUrl} />
@@ -376,6 +386,7 @@ export function FriendsPanel({
                       title={`${person.nowPlaying.title} - ${person.nowPlaying.artist}`}
                     >
                       ♪ {person.nowPlaying.title}
+                      {person.nowPlaying.artist ? ` · ${person.nowPlaying.artist}` : ""}
                     </span>
                   ) : (
                     <span>{person.online ? "Online" : "Offline"}</span>
@@ -441,6 +452,20 @@ export function FriendsPanel({
             ))}
           </section>
         )}
+    </>
+  );
+
+  if (inline) {
+    return <div className="friends-inline">{body}</div>;
+  }
+
+  return (
+    <div className="modal-backdrop" onMouseDown={onClose}>
+      <section
+        className="settings-modal friends-modal"
+        onMouseDown={(event) => event.stopPropagation()}
+      >
+        {body}
       </section>
     </div>
   );

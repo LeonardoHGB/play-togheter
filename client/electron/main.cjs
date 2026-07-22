@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, shell, Notification, nativeImage } = require("electron");
+const { app, BrowserWindow, Menu, ipcMain, shell, Notification, nativeImage } = require("electron");
 const fs = require("fs");
 const http = require("http");
 const path = require("path");
@@ -463,6 +463,8 @@ ipcMain.handle("app:notify", (_event, payload = {}) => {
 ipcMain.handle("app:version", () => app.getVersion());
 
 app.whenReady().then(() => {
+  // Remove a barra de menu padrão do Electron (File/Edit/View/Window/Help).
+  Menu.setApplicationMenu(null);
   migrateLegacyConfig();
   startSpotifyCallbackServer();
   createWindow();

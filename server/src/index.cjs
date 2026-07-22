@@ -493,6 +493,36 @@ io.on("connection", (socket) => {
     callback?.({ ok: true, room: serializeRoom(room) });
   });
 
+  socket.on("room:leave", (_payload, callback) => {
+    const room = rooms.get(socket.data.roomCode);
+    socket.data.roomCode = null;
+    if (!room) {
+      callback?.({ ok: true });
+      return;
+    }
+    const code = room.code;
+    const wasHost = room.hostId === socket.id;
+    socket.leave(code);
+
+    if (wasHost) {
+      // Host saiu: encerra a sala e avisa todos os participantes.
+      io.to(code).emit("room:closed", { reason: "host-left" });
+      for (const socketId of room.members.keys()) {
+        const other = io.sockets.sockets.get(socketId);
+        if (other) {
+          other.data.roomCode = null;
+          other.leave(code);
+        }
+      }
+      rooms.delete(code);
+    } else {
+      room.members.delete(socket.id);
+      if (room.members.size === 0) rooms.delete(code);
+      else emitRoom(room);
+    }
+    callback?.({ ok: true });
+  });
+
   socket.on("playback:host-sync", ({ playback }, callback) => {
     const room = rooms.get(socket.data.roomCode);
     const member = room?.members.get(socket.id);
