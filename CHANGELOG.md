@@ -22,11 +22,18 @@ o Keep a Changelog e o projeto usa versionamento semântico.
   o hover aplica um destaque suave. Respeita `prefers-reduced-motion`.
 - README renovado com banner animado, resumo com efeito de digitação e badges da
   stack.
+- Login obrigatório: a tela inicial exige entrar com o Spotify (botão) no lugar
+  do nome digitado. Sem estar logado não é possível criar nem entrar em salas.
+- Bloqueio por versão: o servidor recusa clientes cuja versão seja diferente da
+  dele (a versão vai no handshake do socket).
 
 ### Alterado
 
 - O dispositivo de reprodução padrão do Spotify passa a preferir o computador
-  (Spotify Desktop) quando disponível.
+  (Spotify Desktop) quando disponível, e o seletor manual de dispositivo foi
+  removido da interface.
+- Sem Spotify e sem sessão salva, o app não cria mais conta anônima automática;
+  o servidor também passa a exigir conta autenticada para criar ou entrar em salas.
 - O nome usado ao criar ou entrar em salas passa a vir da conta logada.
 - Migração automática do banco: colunas `spotify_id` e `avatar_url` são
   adicionadas à tabela `accounts` sem quebrar contas antigas.

@@ -1,5 +1,9 @@
 import { io } from "socket.io-client";
 
+// Injetada pelo Vite (define). Fallback vazio evita ReferenceError fora do build.
+const APP_VERSION =
+  typeof __APP_VERSION__ !== "undefined" ? __APP_VERSION__ : "";
+
 let activeSocket = null;
 let activeServerUrl = "";
 
@@ -37,6 +41,7 @@ export function configureSocket(serverUrl) {
   activeServerUrl = normalized;
   activeSocket = io(normalized, {
     autoConnect: false,
+    auth: { version: APP_VERSION },
     transports: ["websocket", "polling"],
     reconnection: true,
     reconnectionAttempts: Infinity,

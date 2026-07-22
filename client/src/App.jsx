@@ -500,24 +500,40 @@ export default function App() {
       // (o que também restaura a janela se estiver em modo mini).
       const activeRoom = roomRef.current;
       if (activeRoom?.code) {
-        activeSocket.emit(
-          "room:join",
-          {
-            code: activeRoom.code,
-            displayName: localStorage.getItem("display_name") || "Convidado"
-          },
-          (result) => {
-            if (!result?.ok) {
+        // A reautenticação (account:spotify) roda em paralelo ao reconnect, então
+        // o rejoin pode chegar antes da conta existir. Tenta de novo algumas vezes
+        // antes de desistir e voltar ao lobby.
+        const attemptRejoin = (retriesLeft) => {
+          activeSocket.emit(
+            "room:join",
+            {
+              code: activeRoom.code,
+              displayName: localStorage.getItem("display_name") || "Convidado"
+            },
+            (result) => {
+              if (result?.ok) return;
+              if (retriesLeft > 0) {
+                setTimeout(() => attemptRejoin(retriesLeft - 1), 1200);
+                return;
+              }
               setRoom(null);
               setNotice("A conexão caiu e a sala não existe mais.");
             }
-          }
-        );
+          );
+        };
+        attemptRejoin(2);
       }
     };
     const onDisconnect = () => setSocketConnected(false);
     const onConnectError = (error) => {
       setSocketConnected(false);
+      if (error?.data?.code === "VERSION_MISMATCH") {
+        setConnectionError(
+          `Versão incompatível com o servidor (ele exige a ${error.data.serverVersion}). ` +
+            "Baixe a versão mais recente do Spotgino."
+        );
+        return;
+      }
       setConnectionError(`Socket.IO: ${error.message}`);
     };
     const onRoomState = (nextRoom) => setRoom(nextRoom);
@@ -1342,9 +1358,9 @@ export default function App() {
               <button
                 className="primary-button"
                 onClick={createRoom}
-                disabled={!socketConnected}
+                disabled={!socketConnected || !friendsHub.account}
               >
-                Criar nova sala
+                {friendsHub.account ? "Criar nova sala" : "Entrando na sua conta..."}
               </button>
 
               <div className="divider"><span>ou entrar com código</span></div>
@@ -1359,7 +1375,7 @@ export default function App() {
                 <button
                   className="secondary-button"
                   onClick={joinRoom}
-                  disabled={!socketConnected}
+                  disabled={!socketConnected || !friendsHub.account}
                 >
                   Entrar
                 </button>
@@ -1548,30 +1564,6 @@ export default function App() {
                     spotifyProfile?.id ||
                     "Conta Spotify"}
                 </p>
-              </div>
-
-              <label className="small-label">
-                Dispositivo de reprodução
-                <select
-                  value={spotifyDeviceId}
-                  onChange={(event) => setSpotifyDeviceId(event.target.value)}
-                >
-                  <option value="">Selecione um dispositivo</option>
-                  {spotifyDevices.map((device) => (
-                    <option key={device.id} value={device.id}>
-                      {device.name} {device.is_active ? "(ativo)" : ""}
-                    </option>
-                  ))}
-                </select>
-              </label>
-
-              <div className="spotify-actions">
-                <button className="ghost-button" onClick={refreshDevices}>
-                  Atualizar
-                </button>
-                <button className="ghost-button" onClick={transferPlayback}>
-                  Usar dispositivo
-                </button>
               </div>
 
               {!isHost && (

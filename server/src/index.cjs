@@ -5,6 +5,7 @@ const http = require("http");
 const { Server } = require("socket.io");
 const db = require("./db.cjs");
 
+const APP_VERSION = "3.1.0";
 const PORT = Number(process.env.PORT || 3333);
 const HOST = process.env.HOST || "0.0.0.0";
 const SERVER_NAME = process.env.SERVER_NAME || "Spotgino";
@@ -50,6 +51,25 @@ const io = new Server(server, {
 
 const DB_FILE = process.env.DB_FILE || "./data/listen-together.db";
 db.init(DB_FILE);
+
+// Bloqueia clientes cuja versão não seja exatamente a do servidor. A versão vem
+// no handshake (auth.version); clientes antigos, sem esse campo, também caem.
+io.use((socket, next) => {
+  const clientVersion = socket.handshake.auth?.version;
+  if (clientVersion === APP_VERSION) {
+    next();
+    return;
+  }
+  const error = new Error(
+    `Versão incompatível. Atualize o Spotgino para a versão ${APP_VERSION}.`
+  );
+  error.data = {
+    code: "VERSION_MISMATCH",
+    serverVersion: APP_VERSION,
+    clientVersion: clientVersion || null
+  };
+  next(error);
+});
 
 const rooms = new Map();
 
@@ -271,7 +291,7 @@ app.get("/health", (_request, response) => {
     rooms: rooms.size,
     connections: io.engine.clientsCount,
     uptimeSeconds: Math.floor(process.uptime()),
-    version: "3.1.0"
+    version: APP_VERSION
   });
 });
 
@@ -281,6 +301,7 @@ app.get("/demo-tracks", (_request, response) => {
 
 io.on("connection", (socket) => {
   socket.on("room:create", ({ displayName }, callback) => {
+    if (!requireAuth(socket, callback)) return;
     if (rooms.size >= MAX_ROOMS) {
       callback?.({ ok: false, message: "O servidor atingiu o limite de salas." });
       return;
@@ -329,6 +350,7 @@ io.on("connection", (socket) => {
   });
 
   socket.on("room:join", ({ code, displayName }, callback) => {
+    if (!requireAuth(socket, callback)) return;
     const normalizedCode = String(code || "").trim().toUpperCase();
     const room = rooms.get(normalizedCode);
 

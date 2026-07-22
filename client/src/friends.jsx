@@ -86,19 +86,6 @@ export function useFriends({
 
     // socket.timeout(): o callback vira (err, res) — err quando o servidor não
     // responde (ex.: versão antiga sem os handlers de amigos).
-    const register = () =>
-      socket.timeout(8000).emit(
-        "account:register",
-        { displayName: displayNameRef.current },
-        async (err, res) => {
-          if (err) {
-            notify?.("Servidor sem suporte a amigos. Atualize o servidor.");
-            return;
-          }
-          if (res?.ok) await persistAndApply(res);
-        }
-      );
-
     const loginWithStored = () => {
       const stored = credsRef.current;
       if (stored?.userId && stored?.token) {
@@ -108,10 +95,12 @@ export function useFriends({
             return;
           }
           if (res?.ok) applyState(res.state);
-          else register();
+          else setAccount(null); // token inválido: exige novo login pelo Spotify
         });
       } else {
-        register();
+        // Sem Spotify e sem credenciais salvas: não cria conta anônima.
+        // O usuário precisa entrar com o Spotify para ter uma conta.
+        setAccount(null);
       }
     };
 
