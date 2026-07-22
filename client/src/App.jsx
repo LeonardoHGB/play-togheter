@@ -1448,32 +1448,6 @@ export default function App() {
                 </div>
               </div>
 
-              <button
-                className="primary-button"
-                onClick={createRoom}
-                disabled={!socketConnected || !friendsHub.account}
-              >
-                {friendsHub.account ? "Criar nova sala" : "Entrando na sua conta..."}
-              </button>
-
-              <div className="divider"><span>ou entrar com código</span></div>
-
-              <div className="join-row">
-                <input
-                  value={roomCode}
-                  onChange={(event) => setRoomCode(event.target.value.toUpperCase())}
-                  placeholder="EX: A1B2C3"
-                  maxLength={6}
-                />
-                <button
-                  className="secondary-button"
-                  onClick={joinRoom}
-                  disabled={!socketConnected || !friendsHub.account}
-                >
-                  Entrar
-                </button>
-              </div>
-
               <section className="friends-dashboard">
                 <div className="friends-dashboard-head">
                   <span>Amigos</span>
@@ -1554,6 +1528,32 @@ export default function App() {
                   </div>
                 )}
               </section>
+
+              <div className="divider"><span>salas</span></div>
+
+              <button
+                className="primary-button"
+                onClick={createRoom}
+                disabled={!socketConnected || !friendsHub.account}
+              >
+                {friendsHub.account ? "Criar nova sala" : "Entrando na sua conta..."}
+              </button>
+
+              <div className="join-row">
+                <input
+                  value={roomCode}
+                  onChange={(event) => setRoomCode(event.target.value.toUpperCase())}
+                  placeholder="Código da sala (ex: A1B2C3)"
+                  maxLength={6}
+                />
+                <button
+                  className="secondary-button"
+                  onClick={joinRoom}
+                  disabled={!socketConnected || !friendsHub.account}
+                >
+                  Entrar
+                </button>
+              </div>
             </>
           )}
 
