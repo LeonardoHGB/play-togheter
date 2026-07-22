@@ -1299,47 +1299,80 @@ export default function App() {
             </button>
           </div>
 
-          <label>
-            Seu nome
-            <input
-              value={displayName}
-              onChange={(event) => setDisplayName(event.target.value)}
-              placeholder="Como seus amigos verão você"
-            />
-          </label>
+          {!spotifyConnected ? (
+            <div className="login-gate">
+              <p className="login-gate-copy">
+                Entre com sua conta Spotify para criar salas, ver seus amigos e
+                ouvir junto. Seu nome e sua foto vêm da conta.
+              </p>
+              <button
+                className="spotify-login-button"
+                onClick={connectSpotify}
+                disabled={spotifyBusy}
+              >
+                {spotifyBusy ? "Abrindo o Spotify..." : "Entrar com Spotify"}
+              </button>
+              {spotifyError && <div className="error-box">{spotifyError}</div>}
+            </div>
+          ) : (
+            <>
+              <div className="account-welcome">
+                {(friendsHub.account?.avatarUrl ||
+                  spotifyProfile?.images?.[0]?.url) && (
+                  <img
+                    className="avatar"
+                    src={
+                      friendsHub.account?.avatarUrl ||
+                      spotifyProfile?.images?.[0]?.url
+                    }
+                    alt=""
+                    referrerPolicy="no-referrer"
+                  />
+                )}
+                <div>
+                  <span className="account-welcome-eyebrow">Conectado como</span>
+                  <strong>
+                    {friendsHub.account?.displayName ||
+                      spotifyProfile?.display_name ||
+                      "Conta Spotify"}
+                  </strong>
+                </div>
+              </div>
 
-          <button
-            className="primary-button"
-            onClick={createRoom}
-            disabled={!socketConnected}
-          >
-            Criar nova sala
-          </button>
+              <button
+                className="primary-button"
+                onClick={createRoom}
+                disabled={!socketConnected}
+              >
+                Criar nova sala
+              </button>
 
-          <div className="divider"><span>ou entrar com código</span></div>
+              <div className="divider"><span>ou entrar com código</span></div>
 
-          <div className="join-row">
-            <input
-              value={roomCode}
-              onChange={(event) => setRoomCode(event.target.value.toUpperCase())}
-              placeholder="EX: A1B2C3"
-              maxLength={6}
-            />
-            <button
-              className="secondary-button"
-              onClick={joinRoom}
-              disabled={!socketConnected}
-            >
-              Entrar
-            </button>
-          </div>
+              <div className="join-row">
+                <input
+                  value={roomCode}
+                  onChange={(event) => setRoomCode(event.target.value.toUpperCase())}
+                  placeholder="EX: A1B2C3"
+                  maxLength={6}
+                />
+                <button
+                  className="secondary-button"
+                  onClick={joinRoom}
+                  disabled={!socketConnected}
+                >
+                  Entrar
+                </button>
+              </div>
 
-          <button className="friends-button" onClick={() => setFriendsOpen(true)}>
-            <span>Amigos</span>
-            {friendsHub.incoming.length > 0 && (
-              <span className="friends-badge">{friendsHub.incoming.length}</span>
-            )}
-          </button>
+              <button className="friends-button" onClick={() => setFriendsOpen(true)}>
+                <span>Amigos</span>
+                {friendsHub.incoming.length > 0 && (
+                  <span className="friends-badge">{friendsHub.incoming.length}</span>
+                )}
+              </button>
+            </>
+          )}
 
           <button
             className="update-check-link"
