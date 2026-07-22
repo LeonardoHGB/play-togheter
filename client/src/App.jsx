@@ -196,6 +196,8 @@ function ServerSettingsModal({
 
 export default function App() {
   const [runtimeReady, setRuntimeReady] = useState(false);
+  // Splash de abertura: a logo gira por um tempo mínimo antes de abrir o app.
+  const [splashReady, setSplashReady] = useState(false);
   const [serverUrl, setServerUrl] = useState("");
   const [serverDraft, setServerDraft] = useState("");
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -233,7 +235,6 @@ export default function App() {
   const [searchText, setSearchText] = useState("");
   const [searchResults, setSearchResults] = useState([]);
   const [searching, setSearching] = useState(false);
-  const [followerSyncEnabled, setFollowerSyncEnabled] = useState(true);
 
   const roomRef = useRef(room);
   const spotifyDeviceIdRef = useRef(spotifyDeviceId);
@@ -488,6 +489,11 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    const timer = setTimeout(() => setSplashReady(true), 1800);
+    return () => clearTimeout(timer);
+  }, []);
+
+  useEffect(() => {
     if (!runtimeReady || !serverUrl) return undefined;
 
     const activeSocket = getSocket() || configureSocket(serverUrl);
@@ -676,22 +682,16 @@ export default function App() {
       !spotifyConnected ||
       !room?.playback ||
       isHost ||
-      !followerSyncEnabled ||
       room.playback.source !== "spotify"
     ) {
       return;
     }
 
     syncFollowerToRoom(room.playback);
-  }, [room?.playback?.version, spotifyConnected, isHost, followerSyncEnabled]);
+  }, [room?.playback?.version, spotifyConnected, isHost]);
 
   useEffect(() => {
-    if (
-      !spotifyConnected ||
-      !room?.code ||
-      isHost ||
-      !followerSyncEnabled
-    ) {
+    if (!spotifyConnected || !room?.code || isHost) {
       return undefined;
     }
 
@@ -701,7 +701,7 @@ export default function App() {
     }, GUEST_DRIFT_INTERVAL);
 
     return () => clearInterval(timer);
-  }, [spotifyConnected, room?.code, isHost, followerSyncEnabled]);
+  }, [spotifyConnected, room?.code, isHost]);
 
   async function loadSpotifyConnection() {
     try {
@@ -1266,18 +1266,10 @@ export default function App() {
     else window.open(url, "_blank", "noopener,noreferrer");
   }
 
-  if (!runtimeReady) {
+  if (!runtimeReady || !splashReady) {
     return (
-      <main className="landing">
-        <section className="hero-card loading-card">
-          <div className="brand">
-            <BrandLogo />
-            <div>
-              <strong>Spotgino</strong>
-              <span>Carregando configuração...</span>
-            </div>
-          </div>
-        </section>
+      <main className="splash">
+        <img className="splash-logo" src={logo} alt="Spotgino" draggable={false} />
       </main>
     );
   }
@@ -1567,14 +1559,9 @@ export default function App() {
               </div>
 
               {!isHost && (
-                <label className="sync-toggle">
-                  <input
-                    type="checkbox"
-                    checked={followerSyncEnabled}
-                    onChange={(event) => setFollowerSyncEnabled(event.target.checked)}
-                  />
-                  Sincronizar meu Spotify com o host
-                </label>
+                <p className="sync-auto-note">
+                  Seu Spotify sincroniza automaticamente com o host.
+                </p>
               )}
 
               <button className="danger-button" onClick={disconnectSpotify}>
@@ -1625,20 +1612,26 @@ export default function App() {
             <button className="sync-now-button" onClick={enterMiniMode}>
               ▣ Mini player
             </button>
-            <button className="sync-now-button" onClick={openServerSettings}>
-              ⚙ Servidor
-            </button>
             {isHost && spotifyConnected && (
               <button className="sync-now-button" onClick={refreshHostPlayback}>
                 ↻ Ler Spotify agora
               </button>
             )}
-            <div className="live-pill"><span /> AO VIVO</div>
           </div>
         </header>
 
         <section className="now-playing">
           <div className="cover-wrap">
+            {currentTrack?.cover && (
+              <img
+                key={currentTrack.cover}
+                className="cover-glow"
+                src={currentTrack.cover}
+                alt=""
+                aria-hidden="true"
+                referrerPolicy="no-referrer"
+              />
+            )}
             <Cover track={currentTrack} large />
           </div>
 
