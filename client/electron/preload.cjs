@@ -2,6 +2,7 @@ const { contextBridge, ipcRenderer } = require("electron");
 
 contextBridge.exposeInMainWorld("electronAPI", {
   openExternal: (url) => ipcRenderer.invoke("open-external", url),
+  openUpload: (url) => ipcRenderer.invoke("open-upload", url),
   getAppConfig: () => ipcRenderer.invoke("app-config:get"),
   saveServerUrl: (serverUrl) => ipcRenderer.invoke("app-config:save-server", serverUrl),
   testServerUrl: (serverUrl) => ipcRenderer.invoke("app-config:test-server", serverUrl),

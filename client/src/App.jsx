@@ -16,6 +16,8 @@ import {
   spotifyApi
 } from "./spotify";
 import { useFriends, FriendsPanel, InviteToasts } from "./friends";
+import { usePrivateChat } from "./chat";
+import { AttachButton, ChatAttachment, uploadFile } from "./media";
 import MiniPlayer, { MINI_SIZE, MINI_CHAT_SIZE } from "./miniplayer";
 import logo from "./assets/logo.png";
 
@@ -266,7 +268,7 @@ export default function App() {
   const [miniMode, setMiniMode] = useState(false);
   const [miniChatOpen, setMiniChatOpen] = useState(false);
   const [unreadMessages, setUnreadMessages] = useState(0);
-  const [appVersion, setAppVersion] = useState("3.1.0");
+  const [appVersion, setAppVersion] = useState("3.2.0");
   const [updateStatus, setUpdateStatus] = useState(null); // null | "checking" | {version,url}
   // undefined = ainda sem snapshot da sala; null = snapshot visto, sala vazia.
   const seenMessagesRef = useRef(undefined);
@@ -333,6 +335,14 @@ export default function App() {
     onJoinRoom: (code) => joinRoomByCode(code),
     notify: setNotice
   });
+
+  // Chat privado 1-a-1 entre amigos (histórico no servidor, entrega em tempo real).
+  const chat = usePrivateChat({
+    socketConnected,
+    account: friendsHub.account,
+    notify: setNotice
+  });
+  const [roomAttachBusy, setRoomAttachBusy] = useState(false);
 
   // A identidade (nome) passa a vir da conta logada — normalmente o Spotify.
   // Sincroniza o displayName usado ao criar/entrar em salas.
@@ -1362,6 +1372,19 @@ export default function App() {
     setChatMessage("");
   }
 
+  // Envia um anexo para o chat da sala (upload no servidor + chat:send).
+  async function sendRoomAttachment(file) {
+    setRoomAttachBusy(true);
+    try {
+      const attachment = await uploadFile(file, friendsHub.getCreds());
+      getSocket()?.emit("chat:send", { attachment });
+    } catch (error) {
+      setNotice(error.message || "Falha ao enviar o arquivo.");
+    } finally {
+      setRoomAttachBusy(false);
+    }
+  }
+
   async function transferPlayback() {
     try {
       setSpotifyBusy(true);
@@ -1498,8 +1521,10 @@ export default function App() {
               onClick={() => setHomeView("amigos")}
             >
               <span className="nav-ico"><IconUsers /></span> Amigos
-              {friendsHub.incoming.length > 0 && (
-                <span className="nav-badge">{friendsHub.incoming.length}</span>
+              {friendsHub.incoming.length + chat.totalUnread > 0 && (
+                <span className="nav-badge">
+                  {friendsHub.incoming.length + chat.totalUnread}
+                </span>
               )}
             </button>
             <button type="button" className="nav-item" onClick={openServerSettings}>
@@ -1579,6 +1604,8 @@ export default function App() {
               inRoom={false}
               roomCode={undefined}
               notify={setNotice}
+              chat={chat}
+              creds={friendsHub.getCreds()}
             />
           ) : (
             <>
@@ -1813,6 +1840,8 @@ export default function App() {
         inRoom={false}
         roomCode={undefined}
         notify={setNotice}
+        chat={chat}
+        creds={friendsHub.getCreds()}
       />
       {listeningTo && (
         <div className="bottom-player">
@@ -2313,7 +2342,8 @@ export default function App() {
                   )}
                   <div>
                     <strong>{message.author}</strong>
-                    <p>{message.message}</p>
+                    {message.message && <p>{message.message}</p>}
+                    {message.attachment && <ChatAttachment attachment={message.attachment} />}
                   </div>
                 </div>
               ))}
@@ -2321,6 +2351,11 @@ export default function App() {
             </div>
 
             <form className="chat-form" onSubmit={sendMessage}>
+              <AttachButton
+                onPick={sendRoomAttachment}
+                busy={roomAttachBusy}
+                disabled={!friendsHub.account}
+              />
               <input
                 value={chatMessage}
                 onChange={(event) => setChatMessage(event.target.value)}
@@ -2360,6 +2395,8 @@ export default function App() {
       inRoom={Boolean(room)}
       roomCode={room?.code}
       notify={setNotice}
+      chat={chat}
+      creds={friendsHub.getCreds()}
     />
     <InviteToasts
       invites={friendsHub.invites}

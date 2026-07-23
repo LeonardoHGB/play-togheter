@@ -51,9 +51,21 @@ function init(dbFile) {
       PRIMARY KEY (from_id, to_id)
     );
 
+    CREATE TABLE IF NOT EXISTS private_messages (
+      id         TEXT PRIMARY KEY,
+      from_id    TEXT NOT NULL,
+      to_id      TEXT NOT NULL,
+      body       TEXT,
+      attachment TEXT,
+      created_at INTEGER NOT NULL,
+      read_at    INTEGER
+    );
+
     CREATE INDEX IF NOT EXISTS idx_friendships_owner ON friendships(owner_id);
     CREATE INDEX IF NOT EXISTS idx_requests_to ON friend_requests(to_id);
     CREATE INDEX IF NOT EXISTS idx_requests_from ON friend_requests(from_id);
+    CREATE INDEX IF NOT EXISTS idx_pm_pair ON private_messages(from_id, to_id, created_at);
+    CREATE INDEX IF NOT EXISTS idx_pm_unread ON private_messages(to_id, read_at);
   `);
 
   // Migração: identidade vinda do Spotify (contas antigas ficam com NULL).
@@ -273,6 +285,87 @@ function listOutgoingRequests(userId) {
     .all(userId);
 }
 
+// --- Mensagens privadas -------------------------------------------------
+
+function rowToMessage(row) {
+  if (!row) return null;
+  let attachment = null;
+  if (row.attachment) {
+    try {
+      attachment = JSON.parse(row.attachment);
+    } catch {
+      attachment = null;
+    }
+  }
+  return {
+    id: row.id,
+    fromId: row.from_id,
+    toId: row.to_id,
+    body: row.body || "",
+    attachment,
+    createdAt: row.created_at,
+    readAt: row.read_at || null
+  };
+}
+
+function insertPrivateMessage({ id, fromId, toId, body, attachment }) {
+  requireDb()
+    .prepare(
+      "INSERT INTO private_messages (id, from_id, to_id, body, attachment, created_at, read_at) VALUES (?, ?, ?, ?, ?, ?, NULL)"
+    )
+    .run(
+      id,
+      fromId,
+      toId,
+      body || null,
+      attachment ? JSON.stringify(attachment) : null,
+      Date.now()
+    );
+  return rowToMessage({
+    id,
+    from_id: fromId,
+    to_id: toId,
+    body,
+    attachment: attachment ? JSON.stringify(attachment) : null,
+    created_at: Date.now(),
+    read_at: null
+  });
+}
+
+// Últimas `limit` mensagens trocadas entre dois usuários (ordem cronológica).
+function listConversation(a, b, limit = 100) {
+  const rows = requireDb()
+    .prepare(
+      `SELECT * FROM private_messages
+       WHERE (from_id = ? AND to_id = ?) OR (from_id = ? AND to_id = ?)
+       ORDER BY created_at DESC
+       LIMIT ?`
+    )
+    .all(a, b, b, a, Math.max(1, Math.min(500, limit)));
+  return rows.reverse().map(rowToMessage);
+}
+
+// Marca como lidas as mensagens que `userId` recebeu de `otherId`.
+function markConversationRead(userId, otherId) {
+  return requireDb()
+    .prepare(
+      "UPDATE private_messages SET read_at = ? WHERE to_id = ? AND from_id = ? AND read_at IS NULL"
+    )
+    .run(Date.now(), userId, otherId).changes;
+}
+
+// Não-lidas por remetente: [{ userId, count }].
+function unreadCounts(userId) {
+  return requireDb()
+    .prepare(
+      `SELECT from_id AS userId, COUNT(*) AS count
+       FROM private_messages
+       WHERE to_id = ? AND read_at IS NULL
+       GROUP BY from_id`
+    )
+    .all(userId);
+}
+
 module.exports = {
   init,
   createAccount,
@@ -288,5 +381,9 @@ module.exports = {
   removeFriendship,
   listFriends,
   listIncomingRequests,
-  listOutgoingRequests
+  listOutgoingRequests,
+  insertPrivateMessage,
+  listConversation,
+  markConversationRead,
+  unreadCounts
 };
