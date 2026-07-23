@@ -364,6 +364,32 @@ ipcMain.handle("open-external", async (_event, url) => {
   return true;
 });
 
+// Abre um anexo do chat no navegador externo. Só permite URLs que apontem para
+// o servidor configurado (o navegador faz o download/preview do documento) —
+// não relaxa a allowlist geral de open-external.
+ipcMain.handle("open-upload", async (_event, url) => {
+  let target;
+  try {
+    target = new URL(url);
+  } catch {
+    throw new Error("URL inválida.");
+  }
+  if (!["http:", "https:"].includes(target.protocol)) {
+    throw new Error("Protocolo não permitido.");
+  }
+  let serverOrigin = null;
+  try {
+    serverOrigin = new URL(readConfig().serverUrl).origin;
+  } catch {
+    serverOrigin = null;
+  }
+  if (!serverOrigin || target.origin !== serverOrigin) {
+    throw new Error("URL fora do servidor configurado.");
+  }
+  await shell.openExternal(target.toString());
+  return true;
+});
+
 ipcMain.handle("app-config:get", () => readConfig());
 ipcMain.handle("app-config:save-server", (_event, serverUrl) => writeConfig({ serverUrl }));
 ipcMain.handle("app-config:test-server", (_event, serverUrl) => testServer(serverUrl));

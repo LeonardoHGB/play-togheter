@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { getSocket } from "./socket";
+import { PrivateChat } from "./chat";
 
 // Hook que cuida da conta persistente, da lista de amigos, pedidos e convites.
 // Toda a identidade vive no servidor (SQLite); o token fica salvo na config
@@ -219,6 +220,10 @@ export function useFriends({
     setInvites((prev) => prev.filter((item) => item !== invite));
   }, []);
 
+  // Credenciais da conta (userId + token) para o upload HTTP de anexos, que não
+  // passa pela sessão do socket e precisa se autenticar por conta própria.
+  const getCreds = useCallback(() => credsRef.current, []);
+
   return {
     account,
     friends,
@@ -231,7 +236,8 @@ export function useFriends({
     removeFriend,
     inviteFriend,
     acceptInvite,
-    dismissInvite
+    dismissInvite,
+    getCreds
   };
 }
 
@@ -267,7 +273,9 @@ export function FriendsPanel({
   listeningTo,
   inRoom,
   roomCode,
-  notify
+  notify,
+  chat,
+  creds
 }) {
   const [code, setCode] = useState("");
   const [sending, setSending] = useState(false);
@@ -279,6 +287,10 @@ export function FriendsPanel({
     const rank = (f) => (f.online ? (f.nowPlaying ? 0 : 1) : 2);
     return rank(a) - rank(b) || a.displayName.localeCompare(b.displayName);
   });
+
+  // Conversa privada aberta: substitui a lista pela visão de chat.
+  const activeChatFriend =
+    chat?.openWith ? sortedFriends.find((f) => f.userId === chat.openWith) : null;
 
   async function submitAdd() {
     if (!code.trim() || sending) return;
@@ -294,7 +306,7 @@ export function FriendsPanel({
     notify?.("Seu código foi copiado.");
   }
 
-  const body = (
+  const listBody = (
     <>
       {inline ? (
         <div className="friends-inline-head">
@@ -393,6 +405,18 @@ export function FriendsPanel({
                   )}
                 </div>
                 <div className="friend-actions">
+                  {chat && (
+                    <button
+                      className="mini-button chat"
+                      onClick={() => chat.openConversation(person.userId)}
+                      title="Abrir conversa"
+                    >
+                      Conversar
+                      {chat.unread?.[person.userId] > 0 && (
+                        <span className="mini-badge">{chat.unread[person.userId]}</span>
+                      )}
+                    </button>
+                  )}
                   {person.online &&
                     person.nowPlaying &&
                     (listeningTo === person.userId ? (
@@ -453,6 +477,21 @@ export function FriendsPanel({
           </section>
         )}
     </>
+  );
+
+  const body = activeChatFriend ? (
+    <PrivateChat
+      friend={activeChatFriend}
+      messages={chat.conversations[chat.openWith]}
+      myId={account?.userId}
+      loading={chat.loadingHistory}
+      onBack={chat.closeConversation}
+      onSend={(payload) => chat.sendMessage(chat.openWith, payload)}
+      creds={creds}
+      notify={notify}
+    />
+  ) : (
+    listBody
   );
 
   if (inline) {

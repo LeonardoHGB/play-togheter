@@ -1,11 +1,13 @@
 const cors = require("cors");
 const crypto = require("crypto");
 const express = require("express");
+const fs = require("fs");
 const http = require("http");
+const path = require("path");
 const { Server } = require("socket.io");
 const db = require("./db.cjs");
 
-const APP_VERSION = "3.1.1";
+const APP_VERSION = "3.2.0";
 const PORT = Number(process.env.PORT || 3333);
 const HOST = process.env.HOST || "0.0.0.0";
 const SERVER_NAME = process.env.SERVER_NAME || "Spotgino";
@@ -17,6 +19,52 @@ const MAX_MESSAGES = 200;
 const MAX_QUEUE = 200;
 const RATE_WINDOW_MS = 10_000;
 const RATE_MAX_EVENTS = 150;
+
+// Chat privado + anexos.
+const MAX_UPLOAD_BYTES = Math.max(
+  1_000_000,
+  Number(process.env.MAX_UPLOAD_BYTES) || 25 * 1024 * 1024
+);
+const MAX_TEXT_LEN = 2000;
+
+// Extensões que nunca aceitamos por upload (executáveis/scripts). O arquivo é
+// sempre servido como download (Content-Disposition: attachment) fora de
+// imagem/vídeo/áudio e com X-Content-Type-Options: nosniff, então nada roda no
+// contexto do app; mesmo assim bloqueamos executáveis na entrada.
+const BLOCKED_EXTENSIONS = new Set([
+  "exe", "bat", "cmd", "com", "msi", "scr", "pif", "sh", "bash", "ps1",
+  "vbs", "vbe", "js", "jse", "wsf", "wsh", "jar", "app", "apk", "deb",
+  "dmg", "reg", "lnk", "hta", "cpl", "gadget", "html", "htm", "svg", "xhtml"
+]);
+
+// Tipo lógico do anexo pela extensão — decide como o cliente exibe o preview.
+const IMAGE_EXT = new Set(["png", "jpg", "jpeg", "gif", "webp", "bmp", "avif", "ico"]);
+const VIDEO_EXT = new Set(["mp4", "webm", "ogv", "mov", "m4v", "mkv"]);
+const AUDIO_EXT = new Set(["mp3", "ogg", "oga", "wav", "m4a", "aac", "flac", "opus"]);
+
+const MIME_BY_EXT = {
+  png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif",
+  webp: "image/webp", bmp: "image/bmp", avif: "image/avif", ico: "image/x-icon",
+  mp4: "video/mp4", webm: "video/webm", ogv: "video/ogg", mov: "video/quicktime",
+  m4v: "video/x-m4v", mkv: "video/x-matroska",
+  mp3: "audio/mpeg", ogg: "audio/ogg", oga: "audio/ogg", wav: "audio/wav",
+  m4a: "audio/mp4", aac: "audio/aac", flac: "audio/flac", opus: "audio/opus",
+  pdf: "application/pdf", txt: "text/plain", csv: "text/csv",
+  zip: "application/zip", rar: "application/vnd.rar", "7z": "application/x-7z-compressed",
+  doc: "application/msword",
+  docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  xls: "application/vnd.ms-excel",
+  xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  ppt: "application/vnd.ms-powerpoint",
+  pptx: "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+};
+
+function attachmentKind(ext) {
+  if (IMAGE_EXT.has(ext)) return "image";
+  if (VIDEO_EXT.has(ext)) return "video";
+  if (AUDIO_EXT.has(ext)) return "audio";
+  return "file";
+}
 
 const configuredOrigins = String(process.env.ALLOWED_ORIGINS || "*")
   .split(",")
@@ -56,6 +104,45 @@ const io = new Server(server, {
 
 const DB_FILE = process.env.DB_FILE || "./data/listen-together.db";
 db.init(DB_FILE);
+
+// Uploads ficam ao lado do banco, no mesmo volume persistente (/app/data/uploads).
+const UPLOAD_DIR = path.join(path.dirname(path.resolve(DB_FILE)), "uploads");
+fs.mkdirSync(UPLOAD_DIR, { recursive: true });
+
+// Extensão segura (só letras/números, minúscula) a partir do nome enviado.
+function safeExtension(name) {
+  const ext = String(name || "").toLowerCase().match(/\.([a-z0-9]{1,8})$/);
+  return ext ? ext[1] : "";
+}
+
+// Autentica uma requisição HTTP de upload pelas credenciais da conta (o socket
+// tem a sessão, mas o POST /upload é HTTP puro e precisa se identificar).
+function authenticateHttp(request) {
+  const userId = request.get("x-user-id");
+  const token = request.get("x-user-token");
+  if (!userId || !token) return null;
+  return db.verifyAccount(userId, token);
+}
+
+// Só aceitamos anexos que apontam para um arquivo do nosso próprio /uploads,
+// nunca uma URL arbitrária (evita injeção de link/tracking pixel via chat).
+function validateAttachment(att) {
+  if (!att || typeof att !== "object") return null;
+  const url = String(att.url || "");
+  if (!/^\/uploads\/[a-f0-9-]+\.[a-z0-9]{1,8}$/.test(url)) return null;
+  const size = Number(att.size);
+  if (!Number.isFinite(size) || size < 0 || size > MAX_UPLOAD_BYTES) return null;
+  const kind = ["image", "video", "audio", "file"].includes(att.kind)
+    ? att.kind
+    : "file";
+  return {
+    url,
+    name: String(att.name || "arquivo").slice(0, 200),
+    mime: String(att.mime || "application/octet-stream").slice(0, 120),
+    size,
+    kind
+  };
+}
 
 // Bloqueia clientes cuja versão não seja exatamente a do servidor. A versão vem
 // no handshake (auth.version); clientes antigos, sem esse campo, também caem.
@@ -138,7 +225,8 @@ function friendState(userId) {
       nowPlaying: nowPlayingOf(friend.userId)
     })),
     incoming: db.listIncomingRequests(userId),
-    outgoing: db.listOutgoingRequests(userId)
+    outgoing: db.listOutgoingRequests(userId),
+    dmUnread: db.unreadCounts(userId)
   };
 }
 
@@ -363,6 +451,103 @@ app.get("/health", (_request, response) => {
 
 app.get("/demo-tracks", (_request, response) => {
   response.json(demoTracks);
+});
+
+// Upload de anexo do chat (imagem/vídeo/áudio/documento). Corpo bruto — sem
+// dependência de multipart. O nome original vem em ?name= e é só usado para a
+// extensão e para o nome de download; o arquivo é salvo com um id aleatório.
+app.post(
+  "/upload",
+  express.raw({ type: () => true, limit: MAX_UPLOAD_BYTES }),
+  (request, response) => {
+    const account = authenticateHttp(request);
+    if (!account) {
+      response.status(401).json({ ok: false, message: "Não autenticado." });
+      return;
+    }
+
+    const body = request.body;
+    if (!Buffer.isBuffer(body) || body.length === 0) {
+      response.status(400).json({ ok: false, message: "Arquivo vazio." });
+      return;
+    }
+
+    const originalName = String(request.query.name || "arquivo").slice(0, 200);
+    const ext = safeExtension(originalName);
+    if (!ext) {
+      response.status(400).json({ ok: false, message: "Arquivo sem extensão reconhecida." });
+      return;
+    }
+    if (BLOCKED_EXTENSIONS.has(ext)) {
+      response.status(415).json({ ok: false, message: "Esse tipo de arquivo não é permitido." });
+      return;
+    }
+
+    const fileName = `${crypto.randomUUID()}.${ext}`;
+    try {
+      fs.writeFileSync(path.join(UPLOAD_DIR, fileName), body);
+    } catch (error) {
+      console.error("Falha ao gravar upload:", error);
+      response.status(500).json({ ok: false, message: "Falha ao salvar o arquivo." });
+      return;
+    }
+
+    response.json({
+      ok: true,
+      attachment: {
+        url: `/uploads/${fileName}`,
+        name: originalName,
+        mime: MIME_BY_EXT[ext] || "application/octet-stream",
+        size: body.length,
+        kind: attachmentKind(ext)
+      }
+    });
+  }
+);
+
+// Serve o anexo. Nome no padrão <uuid>.<ext> (regex barra path traversal).
+// Imagem/vídeo/áudio vão inline (com suporte a Range para o player de vídeo);
+// o resto vai como download. nosniff impede execução por content-type adivinhado.
+app.get("/uploads/:file", (request, response) => {
+  const file = String(request.params.file || "");
+  if (!/^[a-f0-9-]+\.[a-z0-9]{1,8}$/.test(file)) {
+    response.status(400).end("Arquivo inválido.");
+    return;
+  }
+
+  const ext = safeExtension(file);
+  const kind = attachmentKind(ext);
+  const disposition = kind === "file" ? "attachment" : "inline";
+  const downloadName = String(request.query.name || file)
+    .replace(/[^\w.\- ]+/g, "_")
+    .slice(0, 200);
+
+  response.setHeader("X-Content-Type-Options", "nosniff");
+  response.setHeader("Content-Type", MIME_BY_EXT[ext] || "application/octet-stream");
+  response.setHeader("Content-Disposition", `${disposition}; filename="${downloadName}"`);
+
+  response.sendFile(path.join(UPLOAD_DIR, file), { dotfiles: "deny" }, (error) => {
+    if (error && !response.headersSent) {
+      response.status(error.status || 404).end("Arquivo não encontrado.");
+    }
+  });
+});
+
+// Corpo grande demais (express.raw) vira JSON em vez do HTML padrão do Express.
+app.use((error, _request, response, next) => {
+  if (response.headersSent) {
+    next(error);
+    return;
+  }
+  if (error?.type === "entity.too.large" || error?.status === 413) {
+    response.status(413).json({
+      ok: false,
+      message: `Arquivo excede o limite de ${Math.round(MAX_UPLOAD_BYTES / (1024 * 1024))} MB.`
+    });
+    return;
+  }
+  console.error("Erro HTTP:", error);
+  response.status(500).json({ ok: false, message: "Erro interno." });
 });
 
 function rateLimited(socket) {
@@ -639,12 +824,13 @@ io.on("connection", (socket) => {
     callback?.({ ok: true });
   });
 
-  socket.on("chat:send", ({ message }) => {
+  socket.on("chat:send", ({ message, attachment } = {}) => {
     const room = rooms.get(socket.data.roomCode);
     const member = room?.members.get(socket.id);
     const cleanMessage = String(message || "").trim().slice(0, 500);
+    const cleanAttachment = validateAttachment(attachment);
 
-    if (!room || !member || !cleanMessage) return;
+    if (!room || !member || (!cleanMessage && !cleanAttachment)) return;
 
     room.messages.push({
       id: crypto.randomUUID(),
@@ -652,6 +838,7 @@ io.on("connection", (socket) => {
       author: member.name,
       avatar: member.avatar || null,
       message: cleanMessage,
+      attachment: cleanAttachment,
       createdAt: Date.now()
     });
     if (room.messages.length > MAX_MESSAGES) {
@@ -798,6 +985,62 @@ io.on("connection", (socket) => {
     const userId = requireAuth(socket, callback);
     if (!userId) return;
     callback?.({ ok: true, state: friendState(userId) });
+  });
+
+  // --- Chat privado -----------------------------------------------------
+
+  // Histórico da conversa com um amigo. Abrir a conversa marca como lidas as
+  // mensagens recebidas (persiste no banco para o próximo login).
+  socket.on("dm:history", ({ userId: otherId } = {}, callback) => {
+    const me = requireAuth(socket, callback);
+    if (!me) return;
+    const other = String(otherId || "").trim().toUpperCase();
+    if (!db.areFriends(me, other)) {
+      callback?.({ ok: false, message: "Vocês não são amigos." });
+      return;
+    }
+    db.markConversationRead(me, other);
+    callback?.({ ok: true, messages: db.listConversation(me, other, 100) });
+  });
+
+  // Envia mensagem privada (texto e/ou anexo). Persiste e entrega em tempo real
+  // ao destinatário e aos outros dispositivos do remetente (dedupe por id no
+  // cliente). Se o destinatário estiver offline, recebe no próximo login.
+  socket.on("dm:send", ({ toUserId, body, attachment } = {}, callback) => {
+    const me = requireAuth(socket, callback);
+    if (!me) return;
+    const other = String(toUserId || "").trim().toUpperCase();
+    if (!db.areFriends(me, other)) {
+      callback?.({ ok: false, message: "Vocês não são amigos." });
+      return;
+    }
+    const cleanBody = String(body || "").trim().slice(0, MAX_TEXT_LEN);
+    const cleanAttachment = validateAttachment(attachment);
+    if (!cleanBody && !cleanAttachment) {
+      callback?.({ ok: false, message: "Mensagem vazia." });
+      return;
+    }
+
+    const message = db.insertPrivateMessage({
+      id: crypto.randomUUID(),
+      fromId: me,
+      toId: other,
+      body: cleanBody,
+      attachment: cleanAttachment
+    });
+
+    const fromName = db.getAccount(me)?.displayName || "Amigo";
+    emitToUser(other, "dm:message", { message, fromName });
+    emitToUser(me, "dm:message", { message, fromName });
+    callback?.({ ok: true, message });
+  });
+
+  // Marca a conversa como lida sem precisar recarregar o histórico.
+  socket.on("dm:read", ({ userId: otherId } = {}, callback) => {
+    const me = requireAuth(socket, callback);
+    if (!me) return;
+    db.markConversationRead(me, String(otherId || "").trim().toUpperCase());
+    callback?.({ ok: true });
   });
 
   // --- Convites ---------------------------------------------------------
