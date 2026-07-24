@@ -301,8 +301,11 @@ export default function App() {
   const [miniMode, setMiniMode] = useState(false);
   const [miniChatOpen, setMiniChatOpen] = useState(false);
   const [unreadMessages, setUnreadMessages] = useState(0);
-  const [appVersion, setAppVersion] = useState("3.3.0");
+  const [appVersion, setAppVersion] = useState("3.4.0");
   const [updateStatus, setUpdateStatus] = useState(null); // null | "checking" | {version,url}
+  // Estado do atualizador automático (processo main). Fora do Electron, ou em
+  // desenvolvimento, ele reporta "unsupported" e caímos no aviso com link.
+  const [updater, setUpdater] = useState({ state: "idle" });
   // undefined = ainda sem snapshot da sala; null = snapshot visto, sala vazia.
   const seenMessagesRef = useRef(undefined);
   const miniModeRef = useRef(false);
@@ -496,7 +499,35 @@ export default function App() {
     });
   }, []);
 
+  const autoUpdateReady = Boolean(
+    window.electronAPI?.updater && updater.state !== "unsupported"
+  );
+
+  useEffect(() => {
+    const api = window.electronAPI?.updater;
+    if (!api) return undefined;
+    api.getState().then(setUpdater).catch(() => {});
+    return api.onState(setUpdater);
+  }, []);
+
+  // O processo main só emite "none"/"error" quando a checagem foi pedida pelo
+  // usuário; as automáticas ficam silenciosas.
+  useEffect(() => {
+    if (updater.state === "none") {
+      setNotice(`Você já está na versão mais recente (${appVersion}).`);
+    } else if (updater.state === "error") {
+      setNotice(`Falha ao atualizar: ${updater.message || "erro desconhecido"}`);
+    }
+  }, [updater.state, updater.message, appVersion]);
+
   async function checkForUpdates() {
+    if (autoUpdateReady) {
+      await window.electronAPI.updater.check();
+      return;
+    }
+
+    // Sem atualizador (dev/navegador): mantém a checagem antiga, que só aponta
+    // para a página de download.
     try {
       setUpdateStatus("checking");
       const response = await fetch(RELEASES_API, {
@@ -523,6 +554,45 @@ export default function App() {
       setUpdateStatus(null);
       setNotice(`Falha ao verificar atualização: ${error.message}`);
     }
+  }
+
+  const updateBusy = autoUpdateReady
+    ? updater.state === "checking"
+    : updateStatus === "checking";
+
+  // Uma atualização pronta espera o usuário: nunca reiniciamos sozinhos no meio
+  // de uma música (se ele só fechar o app, o instalador roda na saída).
+  const updateReadyVersion = autoUpdateReady && updater.state === "ready"
+    ? updater.version
+    : null;
+
+  function updateButtonLabel() {
+    if (autoUpdateReady) {
+      if (updater.state === "checking") return "Verificando atualizações...";
+      if (updater.state === "downloading") {
+        return `⬇ Baixando atualização ${updater.percent || 0}%`;
+      }
+      if (updater.state === "ready") return `⬆ Reiniciar para instalar a ${updater.version}`;
+      return "⟳ Verificar atualizações";
+    }
+
+    if (updateStatus === "checking") return "Verificando atualizações...";
+    if (updateStatus) return `⬆ Versão ${updateStatus.version} disponível`;
+    return "⟳ Verificar atualizações";
+  }
+
+  function onUpdateButton() {
+    if (autoUpdateReady) {
+      if (updater.state === "ready") {
+        window.electronAPI.updater.install();
+      } else if (updater.state !== "checking" && updater.state !== "downloading") {
+        checkForUpdates();
+      }
+      return;
+    }
+
+    if (updateStatus && updateStatus !== "checking") openExternalUrl(updateStatus.url);
+    else checkForUpdates();
   }
 
   // Em modo normal o chat é sempre visível: recuperar o foco marca como lido.
@@ -1894,19 +1964,11 @@ export default function App() {
 
           <footer className="home-footer">
             <button
-              className="footer-update"
-              onClick={() =>
-                updateStatus && updateStatus !== "checking"
-                  ? openExternalUrl(updateStatus.url)
-                  : checkForUpdates()
-              }
-              disabled={updateStatus === "checking"}
+              className={`footer-update ${updateReadyVersion ? "ready" : ""}`}
+              onClick={onUpdateButton}
+              disabled={updateBusy}
             >
-              {updateStatus === "checking"
-                ? "Verificando atualizações..."
-                : updateStatus
-                  ? `⬆ Versão ${updateStatus.version} disponível`
-                  : "⟳ Verificar atualizações"}
+              {updateButtonLabel()}
             </button>
           </footer>
         </div>
@@ -2196,7 +2258,16 @@ export default function App() {
             >
               ⤶ Sair da sala
             </button>
-            {updateStatus && updateStatus !== "checking" && (
+            {updateReadyVersion && (
+              <button
+                className="update-pill"
+                onClick={() => window.electronAPI.updater.install()}
+                title="Reiniciar agora e instalar a atualização"
+              >
+                ⬆ v{updateReadyVersion} pronta, reiniciar
+              </button>
+            )}
+            {!updateReadyVersion && updateStatus && updateStatus !== "checking" && (
               <button
                 className="update-pill"
                 onClick={() => openExternalUrl(updateStatus.url)}
@@ -2205,13 +2276,18 @@ export default function App() {
                 ⬆ v{updateStatus.version} disponível
               </button>
             )}
+            {autoUpdateReady && updater.state === "downloading" && (
+              <span className="update-pill downloading" title="Baixando em segundo plano">
+                ⬇ {updater.percent || 0}%
+              </span>
+            )}
             <button
               className="sync-now-button"
-              onClick={checkForUpdates}
-              disabled={updateStatus === "checking"}
-              title="Verificar atualizações no GitHub"
+              onClick={onUpdateButton}
+              disabled={updateBusy}
+              title="Verificar atualizações"
             >
-              {updateStatus === "checking" ? "⟳ ..." : "⟳ Atualizar"}
+              {updateBusy ? "⟳ ..." : "⟳ Atualizar"}
             </button>
             <button className="sync-now-button" onClick={enterMiniMode}>
               ▣ Mini player

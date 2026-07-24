@@ -2,6 +2,7 @@ const { app, BrowserWindow, Menu, ipcMain, shell, Notification, nativeImage } = 
 const fs = require("fs");
 const http = require("http");
 const path = require("path");
+const { initUpdater } = require("./updater.cjs");
 
 const CALLBACK_HOST = "127.0.0.1";
 const CALLBACK_PORT = 43821;
@@ -500,6 +501,7 @@ app.whenReady().then(() => {
   migrateLegacyConfig();
   startSpotifyCallbackServer();
   createWindow();
+  initUpdater(() => mainWindow);
 
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
