@@ -10,8 +10,64 @@ export function formatBytes(bytes) {
   return `${(n / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+// Miniatura: o chat mostra a imagem numa caixa de ~200px, mas sem isso o
+// navegador baixa e decodifica o original inteiro (até 25 MB) só para reduzir
+// na tela. Com 100 mensagens de histórico isso estoura a memória.
+const THUMB_MAX_EDGE = 480;
+const THUMB_QUALITY = 0.72;
+const THUMB_SKIP_BELOW = 200 * 1024;
+
+async function makeThumbnail(file) {
+  // GIF fica de fora: createImageBitmap devolve só o primeiro quadro e a
+  // miniatura mataria a animação.
+  if (!file.type.startsWith("image/") || file.type === "image/gif") return null;
+  if (file.size <= THUMB_SKIP_BELOW) return null;
+
+  let bitmap;
+  try {
+    bitmap = await createImageBitmap(file);
+  } catch {
+    return null;
+  }
+
+  try {
+    const scale = Math.min(1, THUMB_MAX_EDGE / Math.max(bitmap.width, bitmap.height));
+    const width = Math.max(1, Math.round(bitmap.width * scale));
+    const height = Math.max(1, Math.round(bitmap.height * scale));
+
+    const canvas = document.createElement("canvas");
+    canvas.width = width;
+    canvas.height = height;
+    canvas.getContext("2d").drawImage(bitmap, 0, 0, width, height);
+
+    return await new Promise((resolve) =>
+      canvas.toBlob(resolve, "image/jpeg", THUMB_QUALITY)
+    );
+  } finally {
+    bitmap.close?.();
+  }
+}
+
+async function uploadBlob(blob, name, base, creds) {
+  const response = await fetch(`${base}/upload?name=${encodeURIComponent(name)}`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/octet-stream",
+      "x-user-id": creds.userId,
+      "x-user-token": creds.token
+    },
+    body: blob
+  });
+
+  const data = await response.json().catch(() => null);
+  if (!response.ok || !data?.ok) {
+    throw new Error(data?.message || "Falha ao enviar o arquivo.");
+  }
+  return data.attachment;
+}
+
 // Sobe o arquivo para o servidor (corpo bruto) e devolve os metadados do anexo:
-// { url, name, mime, size, kind }. `creds` = { userId, token } da conta logada.
+// { url, name, mime, size, kind, thumbUrl? }. `creds` = { userId, token }.
 export async function uploadFile(file, creds) {
   const base = getServerUrl();
   if (!base) throw new Error("Sem conexão com o servidor.");
@@ -22,21 +78,23 @@ export async function uploadFile(file, creds) {
     throw new Error("Arquivo muito grande (máx. 25 MB).");
   }
 
-  const response = await fetch(`${base}/upload?name=${encodeURIComponent(file.name)}`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/octet-stream",
-      "x-user-id": creds.userId,
-      "x-user-token": creds.token
-    },
-    body: file
-  });
+  const attachment = await uploadBlob(file, file.name, base, creds);
 
-  const data = await response.json().catch(() => null);
-  if (!response.ok || !data?.ok) {
-    throw new Error(data?.message || "Falha ao enviar o arquivo.");
+  if (attachment.kind === "image") {
+    // A miniatura é otimização: se falhar, o anexo continua válido e o chat
+    // cai no original.
+    try {
+      const thumb = await makeThumbnail(file);
+      if (thumb) {
+        const uploaded = await uploadBlob(thumb, "thumb.jpg", base, creds);
+        attachment.thumbUrl = uploaded.url;
+      }
+    } catch {
+      // segue sem miniatura
+    }
   }
-  return data.attachment;
+
+  return attachment;
 }
 
 // URL absoluta do anexo (o servidor guarda um caminho relativo /uploads/...).
@@ -46,6 +104,12 @@ export function attachmentUrl(attachment, { download } = {}) {
     ? `?name=${encodeURIComponent(attachment.name || "arquivo")}`
     : "";
   return `${base}${attachment.url}${suffix}`;
+}
+
+// Miniatura quando existe; senão o original (anexos enviados antes desta
+// versão não têm thumbUrl).
+export function thumbnailUrl(attachment) {
+  return `${getServerUrl()}${attachment.thumbUrl || attachment.url}`;
 }
 
 // Abre o anexo fora do app: o navegador externo cuida do download/preview do
@@ -84,7 +148,13 @@ export function ChatAttachment({ attachment }) {
         onClick={() => openAttachment(attachment)}
         title={attachment.name}
       >
-        <img src={src} alt={attachment.name} referrerPolicy="no-referrer" />
+        <img
+          src={thumbnailUrl(attachment)}
+          alt={attachment.name}
+          referrerPolicy="no-referrer"
+          loading="lazy"
+          decoding="async"
+        />
       </button>
     );
   }

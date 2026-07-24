@@ -2,6 +2,10 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { getSocket } from "./socket";
 import { AttachButton, ChatAttachment, uploadFile } from "./media";
 
+// Teto de mensagens mantidas em memória por conversa. O servidor devolve as
+// 100 últimas em dm:history, então isso só limita o acúmulo durante a sessão.
+const CONVERSATION_LIMIT = 200;
+
 function formatTime(ts) {
   try {
     return new Date(ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
@@ -40,7 +44,13 @@ export function usePrivateChat({ socketConnected, account, notify }) {
     setConversations((prev) => {
       const list = prev[other] || [];
       if (list.some((item) => item.id === message.id)) return prev;
-      return { ...prev, [other]: [...list, message] };
+      const next = [...list, message];
+      // O histórico começa com 100 do banco e antes disso crescia sem teto pelo
+      // resto da sessão. O que sai da janela continua no servidor.
+      if (next.length > CONVERSATION_LIMIT) {
+        next.splice(0, next.length - CONVERSATION_LIMIT);
+      }
+      return { ...prev, [other]: next };
     });
   }, []);
 
