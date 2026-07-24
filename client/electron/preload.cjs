@@ -13,6 +13,16 @@ contextBridge.exposeInMainWorld("electronAPI", {
   focusWindow: () => ipcRenderer.invoke("window:focus"),
   notify: (payload) => ipcRenderer.invoke("app:notify", payload),
   getVersion: () => ipcRenderer.invoke("app:version"),
+  updater: {
+    getState: () => ipcRenderer.invoke("updater:state"),
+    check: () => ipcRenderer.invoke("updater:check"),
+    install: () => ipcRenderer.invoke("updater:install"),
+    onState: (callback) => {
+      const listener = (_event, state) => callback(state);
+      ipcRenderer.on("updater:state", listener);
+      return () => ipcRenderer.removeListener("updater:state", listener);
+    }
+  },
   onNotificationClick: (callback) => {
     const listener = () => callback();
     ipcRenderer.on("notification-clicked", listener);

@@ -189,7 +189,24 @@ docker run --rm -v /opt/play-togheter/client:/project -w /project \
   bash -c "npm install --no-audit --no-fund && npm run build:linux"
 ```
 
-Os arquivos saem em `client/release/`: `Spotgino-Setup-<versao>-x64.exe` (instalador), `Spotgino-Portable-<versao>-x64.exe` (portátil), `Spotgino-<versao>-x86_64.AppImage` e `Spotgino-<versao>-amd64.deb`.
+Os arquivos saem em `client/release/`: `Spotgino-Setup-<versao>-x64.exe` (instalador), `Spotgino-<versao>-x86_64.AppImage` e `Spotgino-<versao>-amd64.deb`.
+
+### Publicando uma release (atenção ao auto-update)
+
+A partir da 3.4.0 o app se atualiza sozinho pelo `electron-updater`, e ele lê os **metadados** da release para descobrir que existe versão nova. Publicar só os binários faz o auto-update parar de funcionar **em silêncio** — ninguém recebe erro, simplesmente nada acontece.
+
+A release precisa ter **6 arquivos**:
+
+| Arquivo | Para quê |
+| --- | --- |
+| `Spotgino-Setup-<versao>-x64.exe` | instalador Windows |
+| `Spotgino-Setup-<versao>-x64.exe.blockmap` | permite baixar só a diferença entre versões |
+| `latest.yml` | **metadados do updater no Windows** |
+| `Spotgino-<versao>-amd64.deb` | pacote Debian/Ubuntu |
+| `Spotgino-<versao>-x86_64.AppImage` | AppImage |
+| `latest-linux.yml` | **metadados do updater no Linux** |
+
+Os alvos de build ficam em `build.win.target` / `build.linux.target` no `package.json`. **Não** passe alvos na linha de comando (`electron-builder --win nsis portable`): o argumento sobrescreve a config e volta a gerar o portátil, que não tem como se auto-atualizar.
 
 O mesmo executável serve para todos: cada pessoa configura a URL do servidor dentro do app (fica salva em `%APPDATA%\Spotgino\config.json` no Windows e `~/.config/Spotgino/config.json` no Linux, mesmo formato nos dois).
 
