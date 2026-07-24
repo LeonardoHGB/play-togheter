@@ -1,6 +1,6 @@
 {
   "name": "spotgino",
-  "version": "3.2.0",
+  "version": "3.3.0",
   "private": true,
   "scripts": {
     "install:all": "npm --prefix server install && npm --prefix client install",

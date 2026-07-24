@@ -301,7 +301,7 @@ export default function App() {
   const [miniMode, setMiniMode] = useState(false);
   const [miniChatOpen, setMiniChatOpen] = useState(false);
   const [unreadMessages, setUnreadMessages] = useState(0);
-  const [appVersion, setAppVersion] = useState("3.2.0");
+  const [appVersion, setAppVersion] = useState("3.3.0");
   const [updateStatus, setUpdateStatus] = useState(null); // null | "checking" | {version,url}
   // undefined = ainda sem snapshot da sala; null = snapshot visto, sala vazia.
   const seenMessagesRef = useRef(undefined);

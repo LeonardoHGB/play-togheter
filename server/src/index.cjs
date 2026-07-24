@@ -7,7 +7,7 @@ const path = require("path");
 const { Server } = require("socket.io");
 const db = require("./db.cjs");
 
-const APP_VERSION = "3.2.0";
+const APP_VERSION = "3.3.0";
 const PORT = Number(process.env.PORT || 3333);
 const HOST = process.env.HOST || "0.0.0.0";
 const SERVER_NAME = process.env.SERVER_NAME || "Spotgino";
