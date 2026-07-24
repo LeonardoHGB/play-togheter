@@ -7,7 +7,7 @@ const path = require("path");
 const { Server } = require("socket.io");
 const db = require("./db.cjs");
 
-const APP_VERSION = "3.2.0";
+const APP_VERSION = "3.3.0";
 const PORT = Number(process.env.PORT || 3333);
 const HOST = process.env.HOST || "0.0.0.0";
 const SERVER_NAME = process.env.SERVER_NAME || "Spotgino";
@@ -17,6 +17,9 @@ const ROOM_IDLE_TTL_MS = Math.max(60_000, Number(process.env.ROOM_IDLE_TTL_MS ||
 // Limites de memória e rate limiting (SG-02).
 const MAX_MESSAGES = 200;
 const MAX_QUEUE = 200;
+// Quantas mensagens o cliente recebe no snapshot. O cliente replica esse teto
+// ao aplicar room:patch (ROOM_MESSAGE_LIMIT no App.jsx).
+const ROOM_MESSAGE_LIMIT = 80;
 const RATE_WINDOW_MS = 10_000;
 const RATE_MAX_EVENTS = 150;
 
@@ -126,21 +129,30 @@ function authenticateHttp(request) {
 
 // Só aceitamos anexos que apontam para um arquivo do nosso próprio /uploads,
 // nunca uma URL arbitrária (evita injeção de link/tracking pixel via chat).
+const UPLOAD_PATH_RE = /^\/uploads\/[a-f0-9-]+\.[a-z0-9]{1,8}$/;
+
 function validateAttachment(att) {
   if (!att || typeof att !== "object") return null;
   const url = String(att.url || "");
-  if (!/^\/uploads\/[a-f0-9-]+\.[a-z0-9]{1,8}$/.test(url)) return null;
+  if (!UPLOAD_PATH_RE.test(url)) return null;
   const size = Number(att.size);
   if (!Number.isFinite(size) || size < 0 || size > MAX_UPLOAD_BYTES) return null;
   const kind = ["image", "video", "audio", "file"].includes(att.kind)
     ? att.kind
     : "file";
+
+  // Miniatura gerada pelo cliente. Passa pela mesma validação de caminho da
+  // url: um thumbUrl arbitrário viraria um <img src> apontando para fora.
+  const thumb = String(att.thumbUrl || "");
+  const thumbUrl = UPLOAD_PATH_RE.test(thumb) ? thumb : undefined;
+
   return {
     url,
     name: String(att.name || "arquivo").slice(0, 200),
     mime: String(att.mime || "application/octet-stream").slice(0, 120),
     size,
-    kind
+    kind,
+    ...(thumbUrl ? { thumbUrl } : {})
   };
 }
 
@@ -391,13 +403,24 @@ function serializeRoom(room) {
     members: [...room.members.values()],
     playback: room.playback,
     queue: room.queue.slice(0, MAX_QUEUE),
-    messages: room.messages.slice(-80)
+    messages: room.messages.slice(-ROOM_MESSAGE_LIMIT)
   };
 }
 
 function emitRoom(room) {
   room.lastActivityAt = Date.now();
   io.to(room.code).emit("room:state", serializeRoom(room));
+}
+
+// Envia só a fatia que mudou. O emitRoom empacota a sala inteira (até
+// MAX_QUEUE itens de fila + as últimas 80 mensagens), então usá-lo a cada
+// mensagem de chat ou item de fila reenviava tudo para todo mundo. Pior: o
+// cliente recebia um objeto `room` novo e o React invalidava a árvore inteira.
+// O room:state continua para entrada/saída de membro, onde a sala muda de
+// forma que não compensa descrever incrementalmente.
+function emitRoomPatch(room, patch) {
+  room.lastActivityAt = Date.now();
+  io.to(room.code).emit("room:patch", patch);
 }
 
 function isMaterialPlaybackChange(previous, incoming) {
@@ -734,7 +757,7 @@ io.on("connection", (socket) => {
     }
 
     room.playback = candidate;
-    emitRoom(room);
+    emitRoomPatch(room, { playback: room.playback });
     callback?.({ ok: true, updated: true });
   });
 
@@ -771,7 +794,7 @@ io.on("connection", (socket) => {
       "demo"
     );
 
-    emitRoom(room);
+    emitRoomPatch(room, { playback: room.playback });
     callback?.({ ok: true });
   });
 
@@ -791,7 +814,7 @@ io.on("connection", (socket) => {
     }
 
     room.queue.push(cleaned);
-    emitRoom(room);
+    emitRoomPatch(room, { queue: room.queue.slice(0, MAX_QUEUE) });
     callback?.({ ok: true });
   });
 
@@ -805,7 +828,7 @@ io.on("connection", (socket) => {
     }
 
     const track = room.queue.shift() || null;
-    emitRoom(room);
+    emitRoomPatch(room, { queue: room.queue.slice(0, MAX_QUEUE) });
     callback?.({ ok: true, track });
   });
 
@@ -820,7 +843,7 @@ io.on("connection", (socket) => {
     }
 
     room.queue.splice(numericIndex, 1);
-    emitRoom(room);
+    emitRoomPatch(room, { queue: room.queue.slice(0, MAX_QUEUE) });
     callback?.({ ok: true });
   });
 
@@ -832,7 +855,7 @@ io.on("connection", (socket) => {
 
     if (!room || !member || (!cleanMessage && !cleanAttachment)) return;
 
-    room.messages.push({
+    const entry = {
       id: crypto.randomUUID(),
       memberId: socket.id,
       author: member.name,
@@ -840,12 +863,14 @@ io.on("connection", (socket) => {
       message: cleanMessage,
       attachment: cleanAttachment,
       createdAt: Date.now()
-    });
+    };
+
+    room.messages.push(entry);
     if (room.messages.length > MAX_MESSAGES) {
       room.messages.splice(0, room.messages.length - MAX_MESSAGES);
     }
 
-    emitRoom(room);
+    emitRoomPatch(room, { message: entry });
   });
 
   // --- Conta ------------------------------------------------------------

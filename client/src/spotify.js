@@ -253,7 +253,19 @@ export async function getValidAccessToken({ forceRefresh = false } = {}) {
   throw new Error("Spotify não conectado.");
 }
 
-async function spotifyFetch(path, options = {}, retryOnUnauthorized = true) {
+// Espera o Retry-After antes de tentar de novo, uma vez. Antes o 429 era só
+// propagado como erro na tela; com a quota do Spotify contada por conta de
+// desenvolvedor (mudança de fev/2026), vale absorver o soluço curto.
+// Acima desse teto não retentamos: tentar antes do prazo que o Spotify pediu
+// só rende outro 429 e gasta quota à toa — melhor devolver o erro.
+const MAX_RATE_LIMIT_WAIT_SECONDS = 8;
+
+async function spotifyFetch(
+  path,
+  options = {},
+  retryOnUnauthorized = true,
+  retryOnRateLimit = true
+) {
   const token = await getValidAccessToken();
   const headers = new Headers(options.headers || {});
   headers.set("Authorization", `Bearer ${token}`);
@@ -281,10 +293,21 @@ async function spotifyFetch(path, options = {}, retryOnUnauthorized = true) {
     }
   }
 
+  const retryAfter = Number(response.headers.get("Retry-After") || 0);
+
+  if (
+    response.status === 429 &&
+    retryOnRateLimit &&
+    retryAfter <= MAX_RATE_LIMIT_WAIT_SECONDS
+  ) {
+    await new Promise((resolve) => setTimeout(resolve, Math.max(retryAfter, 1) * 1000));
+    return spotifyFetch(path, options, retryOnUnauthorized, false);
+  }
+
   if (!response.ok) {
     const error = new Error(spotifyErrorMessage(response.status, payload));
     error.status = response.status;
-    error.retryAfter = Number(response.headers.get("Retry-After") || 0);
+    error.retryAfter = retryAfter;
     throw error;
   }
 
@@ -344,17 +367,52 @@ function deviceQuery(deviceId) {
   return deviceId ? `?device_id=${encodeURIComponent(deviceId)}` : "";
 }
 
+// Cache curto do estado de reprodução.
+//
+// O host consulta a cada 2.5s (poll da sala) e a cada 20s (relatório de
+// presença); o convidado consulta na correção de drift (15s) e também no
+// relatório de presença. Esses timers se cruzam periodicamente e disparavam
+// duas requisições idênticas com milissegundos de diferença. O dedupe de
+// in-flight resolve o cruzamento e a janela de 1s resolve a repetição.
+const PLAYBACK_CACHE_MS = 1000;
+let playbackCache = { at: 0, value: null };
+let playbackInFlight = null;
+
+function invalidatePlaybackCache() {
+  playbackCache = { at: 0, value: null };
+}
+
+// Toda escrita passa por aqui: depois de um play/pause/seek o estado anterior
+// mente. Invalida antes e depois, porque uma leitura concorrente durante a
+// requisição repopularia o cache com o estado pré-escrita.
+function playbackWrite(path, options) {
+  invalidatePlaybackCache();
+  return spotifyFetch(path, options).finally(invalidatePlaybackCache);
+}
+
+async function readCurrentPlayback() {
+  if (playbackInFlight) return playbackInFlight;
+  if (Date.now() - playbackCache.at < PLAYBACK_CACHE_MS) return playbackCache.value;
+
+  playbackInFlight = spotifyFetch("/me/player?additional_types=track,episode")
+    .then((payload) => {
+      const value = normalizePlayback(payload);
+      playbackCache = { at: Date.now(), value };
+      return value;
+    })
+    .finally(() => {
+      playbackInFlight = null;
+    });
+
+  return playbackInFlight;
+}
+
 export const spotifyApi = {
   profile: () => spotifyFetch("/me"),
 
   devices: () => spotifyFetch("/me/player/devices"),
 
-  currentPlayback: async () => {
-    const payload = await spotifyFetch(
-      "/me/player?additional_types=track,episode"
-    );
-    return normalizePlayback(payload);
-  },
+  currentPlayback: readCurrentPlayback,
 
   searchTracks: async (query, limit = 15) => {
     const params = new URLSearchParams({
@@ -368,7 +426,7 @@ export const spotifyApi = {
   },
 
   playTrack: ({ uri, positionMs = 0, deviceId }) =>
-    spotifyFetch(`/me/player/play${deviceQuery(deviceId)}`, {
+    playbackWrite(`/me/player/play${deviceQuery(deviceId)}`, {
       method: "PUT",
       body: JSON.stringify({
         uris: [uri],
@@ -377,13 +435,13 @@ export const spotifyApi = {
     }),
 
   resume: ({ deviceId }) =>
-    spotifyFetch(`/me/player/play${deviceQuery(deviceId)}`, {
+    playbackWrite(`/me/player/play${deviceQuery(deviceId)}`, {
       method: "PUT",
       body: JSON.stringify({})
     }),
 
   pause: ({ deviceId }) =>
-    spotifyFetch(`/me/player/pause${deviceQuery(deviceId)}`, {
+    playbackWrite(`/me/player/pause${deviceQuery(deviceId)}`, {
       method: "PUT"
     }),
 
@@ -393,23 +451,23 @@ export const spotifyApi = {
     });
     if (deviceId) params.set("device_id", deviceId);
 
-    return spotifyFetch(`/me/player/seek?${params.toString()}`, {
+    return playbackWrite(`/me/player/seek?${params.toString()}`, {
       method: "PUT"
     });
   },
 
   next: ({ deviceId }) =>
-    spotifyFetch(`/me/player/next${deviceQuery(deviceId)}`, {
+    playbackWrite(`/me/player/next${deviceQuery(deviceId)}`, {
       method: "POST"
     }),
 
   previous: ({ deviceId }) =>
-    spotifyFetch(`/me/player/previous${deviceQuery(deviceId)}`, {
+    playbackWrite(`/me/player/previous${deviceQuery(deviceId)}`, {
       method: "POST"
     }),
 
   transfer: ({ deviceId, play = false }) =>
-    spotifyFetch("/me/player", {
+    playbackWrite("/me/player", {
       method: "PUT",
       body: JSON.stringify({
         device_ids: [deviceId],

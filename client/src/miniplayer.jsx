@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import * as clock from "./playback-position";
 import logo from "./assets/logo.png";
 
 // Dimensões da janela em modo mini (a janela é redimensionada pelo processo
@@ -13,10 +14,26 @@ function formatTime(ms) {
   return `${minutes}:${seconds}`;
 }
 
+// Isolada do MiniPlayer para que o tick de 250ms não re-renderize o mini chat
+// junto com a barra (mesmo motivo do ProgressRow no App).
+function MiniProgress({ durationMs }) {
+  const position = clock.usePosition();
+  const progress = durationMs > 0 ? Math.min(1, position / durationMs) : 0;
+
+  return (
+    <div className="mini-progress">
+      <span>{formatTime(position)}</span>
+      <div className="mini-progress-bar">
+        <div className="mini-progress-fill" style={{ transform: `scaleX(${progress})` }} />
+      </div>
+      <span>{formatTime(durationMs)}</span>
+    </div>
+  );
+}
+
 export default function MiniPlayer({
   room,
   track,
-  position,
   isHost,
   spotifyBusy,
   chatOpen,
@@ -31,7 +48,6 @@ export default function MiniPlayer({
 }) {
   const playback = room?.playback;
   const durationMs = playback?.durationMs || track?.durationMs || 0;
-  const progress = durationMs > 0 ? Math.min(100, (position / durationMs) * 100) : 0;
   const messages = room?.messages || [];
   const chatEndRef = useRef(null);
   const lastMessageId = messages.length ? messages[messages.length - 1].id : null;
@@ -67,16 +83,7 @@ export default function MiniPlayer({
           </div>
         </div>
 
-        <div className="mini-progress">
-          <span>{formatTime(position)}</span>
-          <div className="mini-progress-bar">
-            <div
-              className="mini-progress-fill"
-              style={{ transform: `scaleX(${progress / 100})` }}
-            />
-          </div>
-          <span>{formatTime(durationMs)}</span>
-        </div>
+        <MiniProgress durationMs={durationMs} />
 
         {isHost ? (
           <div className="mini-controls">

@@ -19,6 +19,7 @@ import { useFriends, FriendsPanel, InviteToasts } from "./friends";
 import { usePrivateChat } from "./chat";
 import { AttachButton, ChatAttachment, uploadFile } from "./media";
 import MiniPlayer, { MINI_SIZE, MINI_CHAT_SIZE } from "./miniplayer";
+import * as clock from "./playback-position";
 import logo from "./assets/logo.png";
 
 // Arte circular com glow verde e o logo ao centro (hero da tela inicial).
@@ -99,6 +100,9 @@ function BrandLogo({ className = "logo" }) {
 const HOST_POLL_INTERVAL = 2500;
 const GUEST_DRIFT_INTERVAL = 15000;
 const FOLLOWER_DRIFT_TOLERANCE = 2200;
+// Mesmo teto que o servidor aplica no serializeRoom: ao aplicar um room:patch
+// com mensagem nova, o cliente precisa cortar igual, senão a lista cresce.
+const ROOM_MESSAGE_LIMIT = 80;
 
 const REPO_RELEASES_URL = "https://github.com/LeonardoHGB/Spotgino/releases";
 const RELEASES_API =
@@ -187,6 +191,8 @@ function Cover({ track, large = false }) {
         className={large ? "cover-image cover-image-large" : "cover-image"}
         src={track.cover}
         alt={`Capa de ${track.title}`}
+        loading="lazy"
+        decoding="async"
       />
     );
   }
@@ -194,6 +200,33 @@ function Cover({ track, large = false }) {
   return (
     <div className={large ? "cover-placeholder cover-large" : "cover-placeholder"}>
       ♫
+    </div>
+  );
+}
+
+// Barra de progresso. Assina o store da posição em vez de receber por prop:
+// assim o tick de 250ms re-renderiza só este componente, e não o App() inteiro.
+function ProgressRow({ durationMs, disabled, onSeek }) {
+  const position = clock.usePosition();
+  const max = durationMs || 1;
+
+  return (
+    <div className="progress-row">
+      <span>{formatTime(position)}</span>
+      <input
+        type="range"
+        min="0"
+        max={max}
+        value={Math.min(position, max)}
+        onPointerDown={() => clock.setSeeking(true)}
+        onChange={(event) => clock.set(Number(event.target.value))}
+        onPointerUp={(event) => {
+          clock.setSeeking(false);
+          onSeek(event.currentTarget.value);
+        }}
+        disabled={disabled}
+      />
+      <span>{formatTime(durationMs)}</span>
     </div>
   );
 }
@@ -268,7 +301,7 @@ export default function App() {
   const [miniMode, setMiniMode] = useState(false);
   const [miniChatOpen, setMiniChatOpen] = useState(false);
   const [unreadMessages, setUnreadMessages] = useState(0);
-  const [appVersion, setAppVersion] = useState("3.2.0");
+  const [appVersion, setAppVersion] = useState("3.3.0");
   const [updateStatus, setUpdateStatus] = useState(null); // null | "checking" | {version,url}
   // undefined = ainda sem snapshot da sala; null = snapshot visto, sala vazia.
   const seenMessagesRef = useRef(undefined);
@@ -285,8 +318,8 @@ export default function App() {
   const [connectionError, setConnectionError] = useState("");
   const [chatMessage, setChatMessage] = useState("");
   const [demoTracks, setDemoTracks] = useState([]);
-  const [position, setPosition] = useState(0);
-  const [seeking, setSeeking] = useState(false);
+  // A posição da faixa vive num store externo (./playback-position), não em
+  // state: o tick de 250ms re-renderizava o App() inteiro 4x por segundo.
 
   const [spotifyConnected, setSpotifyConnected] = useState(hasSpotifySession());
   const [spotifyProfile, setSpotifyProfile] = useState(null);
@@ -304,6 +337,10 @@ export default function App() {
   const hostPollingRef = useRef(false);
   const followerSyncRef = useRef(false);
   const followerPendingRef = useRef(null);
+  // Última faixa que o convidado mandou o próprio Spotify tocar. Serve para
+  // pular o currentPlayback quando a sala troca de faixa (ver
+  // applyFollowerPlayback). null = não sabemos, então medimos.
+  const appliedTrackRef = useRef(null);
   const autoAdvancedFromRef = useRef(null);
   const nextTrackRef = useRef(null);
   const chatEndRef = useRef(null);
@@ -312,9 +349,9 @@ export default function App() {
   const isHost = Boolean(room && room.hostId === getSocket()?.id);
   const currentTrack = room?.playback?.track || null;
 
-  // Mantém a referência do nextTrack atual: o ticker do auto-avanço captura
-  // uma closure antiga (deps [seeking]) e chamaria um nextTrack com isHost/room
-  // do mount. Chamando via ref, sempre usamos a versão do render corrente.
+  // Mantém a referência do nextTrack atual: o ticker do auto-avanço roda com
+  // deps [] e chamaria um nextTrack com isHost/room do mount. Chamando via
+  // ref, sempre usamos a versão do render corrente.
   nextTrackRef.current = nextTrack;
 
   // Fornece o access token do Spotify para o login de conta no servidor.
@@ -569,8 +606,10 @@ export default function App() {
     };
   }, []);
 
+  // Piso curto só para a logo não piscar; quem realmente libera a tela é o
+  // runtimeReady. Antes eram 1800ms fixos, que atrasavam a abertura à toa.
   useEffect(() => {
-    const timer = setTimeout(() => setSplashReady(true), 1800);
+    const timer = setTimeout(() => setSplashReady(true), 450);
     return () => clearTimeout(timer);
   }, []);
 
@@ -681,6 +720,37 @@ export default function App() {
       setConnectionError(`Socket.IO: ${error.message}`);
     };
     const onRoomState = (nextRoom) => setRoom(nextRoom);
+
+    // Aplica só a fatia que mudou (room:patch). Preserva a identidade das
+    // fatias que não vieram no patch, então uma mensagem de chat não invalida
+    // a fila e vice-versa.
+    const onRoomPatch = (patch) => {
+      if (!patch) return;
+      setRoom((current) => {
+        if (!current) return current;
+        const next = { ...current };
+
+        if (patch.playback) next.playback = patch.playback;
+        if (patch.queue) next.queue = patch.queue;
+
+        if (patch.message?.id) {
+          // Dedupe: um room:state completo (reconexão) pode trazer a mensagem
+          // que o patch já entregou.
+          if (current.messages?.some((item) => item.id === patch.message.id)) {
+            return next;
+          }
+          const messages = [...(current.messages || []), patch.message];
+          // Mesmo teto que o serializeRoom aplica no servidor.
+          if (messages.length > ROOM_MESSAGE_LIMIT) {
+            messages.splice(0, messages.length - ROOM_MESSAGE_LIMIT);
+          }
+          next.messages = messages;
+        }
+
+        return next;
+      });
+    };
+
     const onRoomClosed = () => {
       exitMiniMode();
       setRoom(null);
@@ -691,6 +761,7 @@ export default function App() {
     activeSocket.on("disconnect", onDisconnect);
     activeSocket.on("connect_error", onConnectError);
     activeSocket.on("room:state", onRoomState);
+    activeSocket.on("room:patch", onRoomPatch);
     activeSocket.on("room:closed", onRoomClosed);
 
     if (!activeSocket.connected) activeSocket.connect();
@@ -701,6 +772,7 @@ export default function App() {
       activeSocket.off("disconnect", onDisconnect);
       activeSocket.off("connect_error", onConnectError);
       activeSocket.off("room:state", onRoomState);
+      activeSocket.off("room:patch", onRoomPatch);
       activeSocket.off("room:closed", onRoomClosed);
     };
   }, [runtimeReady, serverUrl]);
@@ -757,21 +829,24 @@ export default function App() {
   }, [spotifyConnected]);
 
   useEffect(() => {
-    if (!room?.playback || seeking) return;
-    setPosition(expectedPosition(room.playback));
-  }, [room?.playback?.version, seeking]);
+    if (!room?.playback || clock.isSeeking()) return;
+    clock.set(expectedPosition(room.playback));
+  }, [room?.playback?.version]);
 
+  // Tick da barra de progresso. Escreve no store externo em vez de chamar
+  // setState, então o App() não re-renderiza: só quem usa clock.usePosition().
+  // O maybeAutoAdvance continua aqui porque lê tudo de refs, sem state.
   useEffect(() => {
     const timer = setInterval(() => {
       const playback = roomRef.current?.playback;
-      if (!playback || seeking) return;
+      if (!playback) return;
       const pos = expectedPosition(playback);
-      setPosition(pos);
+      if (!clock.isSeeking()) clock.set(pos);
       maybeAutoAdvance(playback, pos);
     }, 250);
 
     return () => clearInterval(timer);
-  }, [seeking]);
+  }, []);
 
   // Chat sempre acompanha a última mensagem. Depende do id da última mensagem
   // (o length trava no cap de 80 do servidor) e rola só o container do chat,
@@ -845,7 +920,12 @@ export default function App() {
       if (playback?.source === "spotify") syncFollowerToRoom(playback);
     }, GUEST_DRIFT_INTERVAL);
 
-    return () => clearInterval(timer);
+    // Trocar de sala ou virar host descarta o que sabíamos do Spotify local:
+    // manter a faixa antiga faria o próximo sync pular um playTrack devido.
+    return () => {
+      clearInterval(timer);
+      appliedTrackRef.current = null;
+    };
   }, [spotifyConnected, room?.code, isHost]);
 
   async function loadSpotifyConnection() {
@@ -998,6 +1078,7 @@ export default function App() {
           error?.status === 403 && /restriction/i.test(error?.message || "");
         if (!alreadyPaused) throw error;
       }
+      appliedTrackRef.current = null;
       setSpotifyLocalPlayback(
         playbackFromTrack(playback.track, {
           isPlaying: false,
@@ -1008,11 +1089,12 @@ export default function App() {
       return;
     }
 
-    const local = await spotifyApi.currentPlayback();
-    const trackChanged = local?.track?.id !== playback.track.id;
-    const drift = Math.abs((local?.positionMs || 0) - targetPosition);
-
-    if (trackChanged || !local?.isPlaying) {
+    // Troca de faixa: o playTrack é obrigatório de qualquer jeito, então não
+    // gastamos um currentPlayback (ida e volta na nuvem) só para confirmar o
+    // óbvio. É justamente o momento em que todo mundo espera o som entrar.
+    // Na MESMA faixa continuamos medindo de verdade: o convidado pode ter
+    // pausado no Spotify dele, e prever em vez de medir mataria o drift check.
+    if (appliedTrackRef.current !== playback.track.id) {
       await runWithDevice((deviceId) =>
         spotifyApi.playTrack({
           uri: playback.track.uri,
@@ -1020,12 +1102,27 @@ export default function App() {
           deviceId
         })
       );
-    } else if (drift > FOLLOWER_DRIFT_TOLERANCE) {
-      await runWithDevice((deviceId) =>
-        spotifyApi.seek({ positionMs: targetPosition, deviceId })
-      );
+    } else {
+      const local = await spotifyApi.currentPlayback();
+      const trackChanged = local?.track?.id !== playback.track.id;
+      const drift = Math.abs((local?.positionMs || 0) - targetPosition);
+
+      if (trackChanged || !local?.isPlaying) {
+        await runWithDevice((deviceId) =>
+          spotifyApi.playTrack({
+            uri: playback.track.uri,
+            positionMs: targetPosition,
+            deviceId
+          })
+        );
+      } else if (drift > FOLLOWER_DRIFT_TOLERANCE) {
+        await runWithDevice((deviceId) =>
+          spotifyApi.seek({ positionMs: targetPosition, deviceId })
+        );
+      }
     }
 
+    appliedTrackRef.current = playback.track.id;
     setSpotifyLocalPlayback(
       playbackFromTrack(playback.track, {
         isPlaying: true,
@@ -1223,10 +1320,12 @@ export default function App() {
   async function togglePlayback() {
     if (!isHost || !room?.playback) return;
 
+    const currentPosition = clock.read();
+
     if (room.playback.source === "demo") {
       getSocket()?.emit("playback:demo-command", {
         action: room.playback.isPlaying ? "pause" : "play",
-        positionMs: position
+        positionMs: currentPosition
       });
       return;
     }
@@ -1239,7 +1338,7 @@ export default function App() {
       if (shouldPlay) {
         await spotifyApi.playTrack({
           uri: room.playback.track.uri,
-          positionMs: position,
+          positionMs: currentPosition,
           deviceId
         });
       } else {
@@ -1249,7 +1348,7 @@ export default function App() {
       emitHostPlayback(
         playbackFromTrack(room.playback.track, {
           isPlaying: shouldPlay,
-          positionMs: position,
+          positionMs: currentPosition,
           deviceName: room.playback.deviceName
         })
       );
@@ -1263,7 +1362,7 @@ export default function App() {
   async function seekPlayback(nextPosition) {
     if (!isHost || !room?.playback) return;
     const numericPosition = Math.max(0, Number(nextPosition) || 0);
-    setPosition(numericPosition);
+    clock.set(numericPosition);
 
     if (room.playback.source === "demo") {
       getSocket()?.emit("playback:demo-command", {
@@ -1913,7 +2012,6 @@ export default function App() {
         <MiniPlayer
           room={room}
           track={currentTrack}
-          position={position}
           isHost={isHost}
           spotifyBusy={spotifyBusy}
           chatOpen={miniChatOpen}
@@ -2154,23 +2252,11 @@ export default function App() {
 
             {currentTrack && (
               <>
-                <div className="progress-row">
-                  <span>{formatTime(position)}</span>
-                  <input
-                    type="range"
-                    min="0"
-                    max={room.playback.durationMs || 1}
-                    value={Math.min(position, room.playback.durationMs || 1)}
-                    onPointerDown={() => setSeeking(true)}
-                    onChange={(event) => setPosition(Number(event.target.value))}
-                    onPointerUp={(event) => {
-                      setSeeking(false);
-                      seekPlayback(event.currentTarget.value);
-                    }}
-                    disabled={!isHost || spotifyBusy}
-                  />
-                  <span>{formatTime(room.playback.durationMs)}</span>
-                </div>
+                <ProgressRow
+                  durationMs={room.playback.durationMs}
+                  disabled={!isHost || spotifyBusy}
+                  onSeek={seekPlayback}
+                />
 
                 <div className="controls">
                   <button

@@ -312,7 +312,13 @@ function createWindow() {
     webPreferences: {
       preload: path.join(__dirname, "preload.cjs"),
       contextIsolation: true,
-      nodeIntegration: false
+      nodeIntegration: false,
+      // Sem isso o Chromium estrangula os timers para ~1x/min quando a janela
+      // é minimizada, e o app inteiro depende de timers: tick de posição
+      // (250ms), poll do host (2.5s), correção de drift (15s) e presença
+      // (20s). Minimizar para ouvir é o uso normal, então a sala
+      // dessincronizava justamente aí.
+      backgroundThrottling: false
     }
   });
 
